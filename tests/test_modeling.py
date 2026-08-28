@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from us_alpha_lab.modeling import generate_ml_predictions
+
+
+def test_generate_ml_predictions_adds_alpha_column() -> None:
+    dates = pd.date_range("2024-01-01", periods=80, freq="B")
+    tickers = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    rows = []
+    for date_index, date in enumerate(dates):
+        for ticker_index, ticker in enumerate(tickers):
+            close = 100 + date_index + ticker_index
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "date": date,
+                    "close": close,
+                    "dollar_volume": 1_000_000 + ticker_index * 1000 + date_index,
+                    "dollar_volume_rank": (ticker_index + 1) / len(tickers),
+                    "volatility_21d": 0.01 * (ticker_index + 1),
+                    "volatility_21d_rank": (ticker_index + 1) / len(tickers),
+                }
+            )
+
+    enriched, metrics = generate_ml_predictions(
+        pd.DataFrame(rows),
+        horizon=5,
+        train_size=30,
+        test_size=10,
+        embargo=2,
+    )
+
+    assert "ml_prediction_5d" in enriched.columns
+    assert enriched["ml_prediction_5d"].notna().sum() > 0
+    assert metrics["folds"] > 0
+
+
+def test_generate_ml_predictions_handles_infinite_features() -> None:
+    dates = pd.date_range("2024-01-01", periods=80, freq="B")
+    tickers = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    rows = []
+    for date_index, date in enumerate(dates):
+        for ticker_index, ticker in enumerate(tickers):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "date": date,
+                    "close": 100 + date_index + ticker_index,
+                    "dollar_volume": 1_000_000 + ticker_index * 1000 + date_index,
+                    "dollar_volume_rank": (ticker_index + 1) / len(tickers),
+                    "volatility_21d": np.inf if date_index == 15 and ticker == "AAA" else 0.01,
+                    "volatility_21d_rank": (ticker_index + 1) / len(tickers),
+                }
+            )
+
+    enriched, metrics = generate_ml_predictions(
+        pd.DataFrame(rows),
+        horizon=5,
+        train_size=30,
+        test_size=10,
+        embargo=2,
+    )
+
+    assert enriched["ml_prediction_5d"].notna().sum() > 0
+    assert metrics["prediction_rows"] > 0

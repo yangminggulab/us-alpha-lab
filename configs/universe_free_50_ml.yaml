@@ -1,0 +1,59 @@
+tickers:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - META
+  - GOOGL
+  - GOOG
+  - TSLA
+  - AVGO
+  - COST
+  - NFLX
+  - AMD
+  - ADBE
+  - CRM
+  - ORCL
+  - CSCO
+  - INTC
+  - QCOM
+  - TXN
+  - AMAT
+  - MU
+  - LRCX
+  - KLAC
+  - PANW
+  - NOW
+  - INTU
+  - ISRG
+  - BKNG
+  - PEP
+  - TMUS
+  - CMCSA
+  - LIN
+  - HON
+  - GE
+  - CAT
+  - DE
+  - JPM
+  - BAC
+  - WFC
+  - GS
+  - MS
+  - V
+  - MA
+  - AXP
+  - UNH
+  - JNJ
+  - MRK
+  - ABBV
+  - LLY
+  - XOM
+start: "2024-08-15"
+end: "2026-08-14"
+timespan: day
+multiplier: 1
+raw_path: data/raw/daily_bars_free_50.parquet
+factors_path: data/processed/factors_free_50_ml.parquet
+model_path: data/models/free_50_ml_model.joblib
+request_pause_seconds: 13

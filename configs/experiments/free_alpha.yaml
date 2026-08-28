@@ -1,0 +1,37 @@
+name: free_alpha
+description: "Massive Stocks Basic free-tier alpha research experiment."
+
+data:
+  source: massive
+  universe_config: configs/universe.yaml
+  raw_path: data/raw/daily_bars.parquet
+  factors_path: data/processed/factors.parquet
+  request_pause_seconds: 13
+
+features:
+  include_formula_factors: true
+  rank_cross_sectionally: true
+
+label:
+  horizon_days: 5
+  target: future_return_5d
+
+signal_evaluation:
+  metrics:
+    - mean_ic
+    - ic_ir
+    - positive_ic_rate
+    - quantile_returns
+
+backtest:
+  factor: dollar_volume
+  horizon_days: 1
+  quantiles: 5
+  cost_bps: 5
+  output_path: reports/free_alpha_backtest.parquet
+
+model:
+  type: random_forest
+  train_test_split: time
+  test_size: 0.25
+  output_path: data/models/latest_model.joblib
