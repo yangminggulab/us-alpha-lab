@@ -10,7 +10,7 @@
 - [研究报告](https://yangminggulab.github.io/us-alpha-lab/research_report.html)
 - [方法说明](https://yangminggulab.github.io/us-alpha-lab/methodology.html)
 
-如果链接显示 404，需要在 GitHub 仓库 `Settings -> Pages` 里把发布源设为 `main` 分支的 `/(root)`。
+如果链接显示 404，需要在 GitHub 仓库 `Settings -> Pages` 里把发布源设为 `gh-pages` 分支的 `/(root)`。
 Pages 启用前，也可以用临时预览：
 [研究报告预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/research_report.html) /
 [方法说明预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/methodology.html)。
