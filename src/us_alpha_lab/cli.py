@@ -16,7 +16,7 @@ from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
 from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_results
 from us_alpha_lab.massive_data import fetch_daily_bars
 from us_alpha_lab.methodology import build_methodology_html
-from us_alpha_lab.modeling import generate_ml_predictions, train_model
+from us_alpha_lab.modeling import generate_ml_predictions, train_model, tune_lightgbm
 from us_alpha_lab.report import build_html_report
 from us_alpha_lab.visualization import (
     create_factor_charts,
@@ -27,6 +27,14 @@ from us_alpha_lab.visualization import (
 )
 
 app = typer.Typer(help="US stock alpha research tools.")
+
+
+def _echo_metrics(metrics: dict[str, float | str]) -> None:
+    for name, value in metrics.items():
+        if isinstance(value, str):
+            typer.echo(f"{name}: {value}")
+        else:
+            typer.echo(f"{name}: {value:.6f}")
 
 
 def _parse_tickers(tickers: str | None, fallback: list[str]) -> list[str]:
@@ -87,13 +95,26 @@ def discover_factors(
 def train(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
     horizon: int = typer.Option(5, help="Forward return horizon in trading days."),
+    model: str = typer.Option(
+        "random_forest",
+        help="Model backend: random_forest, lightgbm, or lightgbm_ranker.",
+    ),
+    label_transform: str = typer.Option(
+        "return",
+        help="Training label transform: return, rank, zscore, or quantile.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
-    metrics = train_model(factor_frame, model_path=cfg.model_path, horizon=horizon)
+    metrics = train_model(
+        factor_frame,
+        model_path=cfg.model_path,
+        horizon=horizon,
+        model_name=model,
+        label_transform=label_transform,
+    )
     typer.echo(f"Saved model to {cfg.model_path}")
-    for name, value in metrics.items():
-        typer.echo(f"{name}: {value:.6f}")
+    _echo_metrics(metrics)
 
 
 @app.command("ml-alpha")
@@ -103,6 +124,14 @@ def ml_alpha(
     train_size: int = typer.Option(252, help="Walk-forward train window in trading days."),
     test_size: int = typer.Option(63, help="Walk-forward test window in trading days."),
     embargo: int = typer.Option(5, help="Embargo gap between train and test windows."),
+    model: str = typer.Option(
+        "random_forest",
+        help="Model backend: random_forest, lightgbm, or lightgbm_ranker.",
+    ),
+    label_transform: str = typer.Option(
+        "return",
+        help="Training label transform: return, rank, zscore, or quantile.",
+    ),
     output_path: Path | None = typer.Option(None, help="Output factor table path."),
 ) -> None:
     cfg = load_config(config)
@@ -113,13 +142,43 @@ def ml_alpha(
         train_size=train_size,
         test_size=test_size,
         embargo=embargo,
+        model_name=model,
+        label_transform=label_transform,
     )
     target_path = output_path or cfg.factors_path
     target_path.parent.mkdir(parents=True, exist_ok=True)
     enriched.to_parquet(target_path, index=False)
     typer.echo(f"Saved ML alpha factors to {target_path}")
-    for name, value in metrics.items():
-        typer.echo(f"{name}: {value:.6f}")
+    _echo_metrics(metrics)
+
+
+@app.command("tune-lightgbm")
+def tune_lightgbm_cmd(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    horizon: int = typer.Option(5, help="Forward return horizon in trading days."),
+    train_size: int = typer.Option(252, help="Walk-forward train window in trading days."),
+    test_size: int = typer.Option(63, help="Walk-forward test window in trading days."),
+    embargo: int = typer.Option(5, help="Embargo gap between train and test windows."),
+    max_trials: int = typer.Option(24, help="Maximum parameter combinations to evaluate."),
+    output_path: Path = typer.Option(
+        Path("reports/lightgbm_tuning.csv"),
+        help="CSV leaderboard for LightGBM tuning results.",
+    ),
+) -> None:
+    cfg = load_config(config)
+    factor_frame = pd.read_parquet(cfg.factors_path)
+    results = tune_lightgbm(
+        factor_frame,
+        horizon=horizon,
+        train_size=train_size,
+        test_size=test_size,
+        embargo=embargo,
+        max_trials=max_trials,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    results.to_csv(output_path, index=False)
+    typer.echo(f"Saved LightGBM tuning results to {output_path}")
+    typer.echo(results.head(10).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
 
 
 @app.command()

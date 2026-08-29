@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html as html_lib
 import math
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -45,7 +45,14 @@ FACTOR_GLOSSARY: dict[str, str] = {
     "alpha_ma_gap_21d": "看股价比 21 日均线高出多少，站上均线越多说明多头越强势。",
     "alpha_liquidity_quality_21d": "看涨跌幅相对成交额的比值，流动性越好、冲击成本越低越受青睐。",
     "alpha_close_position_5": "看近 5 天收盘价在日内高低区间中的位置，收在区间高位说明买盘占优。",
-    "ml_prediction_5d": "随机森林用全部因子走样外预测未来 5 日收益，作为集成信号参与排名。",
+    "alpha_residual_momentum_21d": "看剔除市场同涨同跌后的 21 日个股强弱，捕捉更纯的个股趋势。",
+    "alpha_residual_reversal_5d": "看剔除市场影响后的 5 日过度涨跌，寻找短线残差反转机会。",
+    "alpha_range_compression_21d": "看当日振幅相对近 21 日是否收缩，低振幅状态可能酝酿后续突破或均值回归。",
+    "alpha_volatility_contraction_21d": "看短期波动是否低于月度波动，波动收缩常代表风险释放或趋势蓄势。",
+    "alpha_volume_trend_5_21d": "看 5 日成交量相对 21 日均量是否放大，衡量近期资金关注升温。",
+    "alpha_intraday_quality_21d": "看近 21 日日内上涨是否稳定，买盘越连续越像持续性资金行为。",
+    "alpha_gap_pressure_21d": "看近 21 日隔夜跳空是否持续偏强，捕捉盘后信息和开盘重定价压力。",
+    "ml_prediction_5d": "机器学习模型用全部因子走样外预测未来 5 日收益，作为集成信号参与排名。",
 }
 
 
@@ -299,8 +306,8 @@ def _metric_cards(factors: pd.DataFrame, ic_report: pd.DataFrame) -> str:
         ("平均 IC 信息比率", _fmt(ic_report["ic_ir"].mean())),
     ]
     return "\n".join(
-        '<div class="card"><div class="label">{label}</div>'
-        '<div class="value">{value}</div></div>'.format(label=label, value=value)
+        f'<div class="card"><div class="label">{label}</div>'
+        f'<div class="value">{value}</div></div>'
         for label, value in cards
     )
 
@@ -520,7 +527,7 @@ def build_html_report(
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
-    generated_on = date.today().isoformat()
+    generated_on = datetime.now(timezone.utc).date().isoformat()
 
     ic_summary = visualization.plot_ic_summary(factors, None, horizon=horizon)
     factor_blocks = _factor_blocks(factors, ic_report, horizon, top_n)

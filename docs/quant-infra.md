@@ -2,17 +2,17 @@
 
 这个文件记录 US Alpha Lab 后续做“大一点的因子库 / 更长历史 / 更多股票”时的计算基础设施路线。目标不是一开始就把项目改成重型平台，而是先知道哪些地方会慢、应该怎样测、什么时候值得上 CUDA/GPU。
 
-> 更新日期：2026-08-18。GPU 生态变化很快，安装命令和版本兼容以官方文档为准。
+> 更新日期：2026-08-29。GPU 生态变化很快，安装命令和版本兼容以官方文档为准。
 
 ## 1. 当前项目的计算热点
 
-当前框架主要用 `pandas`、`numpy`、`scikit-learn`：
+当前框架主要用 `pandas`、`numpy`、`scikit-learn` 和 `lightgbm`：
 
 - 因子生成：`src/us_alpha_lab/factors.py` 里大量 `groupby("ticker")`、`rolling`、`pct_change`。
 - 公式因子：`src/us_alpha_lab/operators.py` 里有 `rolling_mean`、`rolling_std`、`rolling_max`、`ts_rank`、`rolling_corr`、`decay_linear`。
 - 横截面处理：`src/us_alpha_lab/feature_engineering.py` 和 `factors.py` 里按 `date` 做 rank、z-score、winsorize。
 - 回测评估：`analysis.py`、`backtest.py`、`leaderboard.py` 按日期循环算 IC、分位组合和收益曲线。
-- 机器学习：`modeling.py` 里 walk-forward 反复训练 `RandomForestRegressor(n_jobs=-1)`。
+- 机器学习：`modeling.py` 里 walk-forward 反复训练 `RandomForestRegressor(n_jobs=-1)`、`LGBMRegressor` 或 `LGBMRanker`。
 
 一般瓶颈顺序大概率是：
 
@@ -32,6 +32,7 @@
 alpha-lab factors
 alpha-lab discover-factors --config configs/universe_free_50.yaml
 alpha-lab ml-alpha --config configs/universe_free_50.yaml
+alpha-lab tune-lightgbm --config configs/universe_sp500.yaml --max-trials 24
 alpha-lab leaderboard --config configs/universe_free_50_ml.yaml
 ```
 
@@ -253,10 +254,11 @@ GPU cudf.pandas output
 
 ### 第五步：训练侧再考虑 GPU
 
-当前模型是 `RandomForestRegressor`，已经用 `n_jobs=-1` 吃 CPU 多核。后续如果训练变慢，可以比较：
+当前模型支持 `RandomForestRegressor`、`LGBMRegressor` 和 `LGBMRanker`，都已经用 `n_jobs=-1` 吃 CPU 多核。后续如果训练变慢，可以比较：
 
 - CPU RandomForest baseline。
-- LightGBM / XGBoost GPU hist。
+- LightGBM CPU vs LightGBM GPU。
+- XGBoost GPU hist。
 - RAPIDS cuML 随机森林或梯度提升。
 
 训练侧要特别小心时间序列泄漏：加速不能改变 walk-forward、embargo、feature lag。

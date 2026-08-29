@@ -23,6 +23,8 @@ def add_alpha_factors(bars: pd.DataFrame) -> pd.DataFrame:
 
     grouped = data.groupby("ticker", group_keys=False)
     data["ret_1d"] = grouped["close"].pct_change()
+    market_return = data.groupby("date")["ret_1d"].transform("mean")
+    data["market_residual_ret_1d"] = data["ret_1d"] - market_return
     data["reversal_1d"] = -data["ret_1d"]
     data["momentum_5d"] = grouped["close"].pct_change(5)
     data["momentum_21d"] = grouped["close"].pct_change(21)
@@ -38,6 +40,31 @@ def add_alpha_factors(bars: pd.DataFrame) -> pd.DataFrame:
     data["close_to_high"] = (data["high"] - data["close"]) / day_range
     data["close_to_low"] = (data["close"] - data["low"]) / day_range
     data["vwap_gap"] = data["close"] / data["vwap"] - 1
+    data["overnight_gap"] = data["open"] / grouped["close"].shift(1).replace(0, np.nan) - 1
+    data["intraday_return"] = (data["close"] - data["open"]) / data["open"].replace(0, np.nan)
+
+    residual_grouped = data.groupby("ticker", group_keys=False)["market_residual_ret_1d"]
+    data["alpha_residual_momentum_21d"] = (
+        residual_grouped.rolling(21).sum().reset_index(level=0, drop=True)
+    )
+    data["alpha_residual_reversal_5d"] = -(
+        residual_grouped.rolling(5).sum().reset_index(level=0, drop=True)
+    )
+    data["daily_range"] = day_range
+    range_mean_21d = grouped["daily_range"].rolling(21).mean().reset_index(level=0, drop=True)
+    data["alpha_range_compression_21d"] = -(day_range / range_mean_21d.replace(0, np.nan) - 1)
+    vol_5d = grouped["ret_1d"].rolling(5).std().reset_index(level=0, drop=True)
+    data["alpha_volatility_contraction_21d"] = -(
+        vol_5d / data["volatility_21d"].replace(0, np.nan) - 1
+    )
+    volume_mean_5d = grouped["volume"].rolling(5).mean().reset_index(level=0, drop=True)
+    data["alpha_volume_trend_5_21d"] = volume_mean_5d / volume_mean.replace(0, np.nan) - 1
+    intraday_mean_21d = grouped["intraday_return"].rolling(21).mean().reset_index(level=0, drop=True)
+    intraday_std_21d = grouped["intraday_return"].rolling(21).std().reset_index(level=0, drop=True)
+    data["alpha_intraday_quality_21d"] = intraday_mean_21d / intraday_std_21d.replace(0, np.nan)
+    gap_mean_21d = grouped["overnight_gap"].rolling(21).mean().reset_index(level=0, drop=True)
+    gap_std_21d = grouped["overnight_gap"].rolling(21).std().reset_index(level=0, drop=True)
+    data["alpha_gap_pressure_21d"] = gap_mean_21d / gap_std_21d.replace(0, np.nan)
 
     data = add_formula_alpha_factors(data.set_index(["ticker", "date"], drop=False)).reset_index(drop=True)
     data = sanitize_factor_values(data, FACTOR_COLUMNS)

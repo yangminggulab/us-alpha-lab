@@ -1,0 +1,3 @@
+[submodule "dx-quant"]
+	path = dx-quant
+	url = git@github.com:yangminggulab/dx-quant.git

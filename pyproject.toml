@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
   "massive>=1.0.0",
   "matplotlib>=3.8",
+  "lightgbm>=4.0",
   "numpy>=1.26",
   "pandas>=2.2",
   "pyarrow>=15.0",

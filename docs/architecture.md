@@ -183,7 +183,7 @@ US Alpha Lab = Massive 免费数据 alpha 研究实验室
    factor ranks -> top-minus-bottom quantile portfolio -> reports/backtest.parquet
 
 7. alpha-lab train
-   lagged factors -> future returns -> model metrics + data/models/latest_model.joblib
+   lagged factors -> return/rank/zscore labels -> model metrics + data/models/latest_model.joblib
 
 8. alpha-lab ml-alpha
    lagged factors -> walk-forward ML prediction -> data/processed/*_ml.parquet
@@ -191,17 +191,20 @@ US Alpha Lab = Massive 免费数据 alpha 研究实验室
 9. alpha-lab leaderboard
    IC report + factor backtests -> reports/leaderboard/factor_leaderboard.csv + charts
 
-10. alpha-lab alpha-cluster
+10. alpha-lab tune-lightgbm
+   factors -> compact LightGBM/Ranker parameter search -> reports/lightgbm_tuning.csv
+
+11. alpha-lab alpha-cluster
    candidate factors -> diagnostics -> reports/alpha_cluster/alpha_cluster_report.csv
 
-11. alpha-lab run-experiment
+12. alpha-lab run-experiment
    existing factors -> runs/<timestamp>_<name>/ complete experiment snapshot
 ```
 
 ## Design Rules
 
 - 数据下载和研究分析分离：拉数据慢且受免费额度限制，后续分析尽量复用本地 parquet。
-- 因子先透明后复杂：先用价格、成交量、VWAP 的可解释因子，再引入更多公式因子。
+- 因子先透明后复杂：先用价格、成交量、VWAP 的可解释因子，再引入价格路径、残差路径和更多公式因子。
 - 先信号评估，再组合评估：IC/Rank IC 判断预测性，分位回测判断能不能变成组合收益。
 - 机器学习必须按时间切分：默认不随机打散，后续再加 walk-forward、purging 和 embargo。
 - 报告和模型不进 Git：`data/`、`reports/`、`.env` 都是本地产物。
@@ -211,6 +214,7 @@ US Alpha Lab = Massive 免费数据 alpha 研究实验室
 因子发现模块现在分成四层：
 
 - `operators.py`: 提供可复用基础算子，避免每个公式都手写 rolling 逻辑。
+- `factors.py`: 生成基础因子、价格路径因子和市场残差路径因子。
 - `formula_factors.py`: 集中放候选公式因子，包括隔夜跳空反转、日内强度、均线偏离、21 日高点距离、流动性质量等。
 - `feature_engineering.py`: 统一清洗 `inf`，并生成横截面 rank / zscore 特征，给回测和机器学习共用。
 - `factor_discovery.py`: 在完整回测前先输出候选报告，看覆盖率、横截面区分度、IC、ICIR 和 discovery score。
@@ -222,8 +226,10 @@ US Alpha Lab = Massive 免费数据 alpha 研究实验室
 机器学习模块现在不是只训练一个模型文件，而是把模型预测本身作为一个可评估 alpha。
 
 - `validation.py`: 生成 walk-forward 时间切分，并在训练窗口和测试窗口之间留出 embargo。
-- `modeling.py`: 用滞后后的因子预测未来 5 日收益，训练前把 `inf` 这类异常值转成缺失值，再交给中位数填补器。
+- `labels.py`: 同时支持未来收益原值、每日横截面 rank、z-score 和 quantile 标签。
+- `modeling.py`: 用滞后后的因子预测未来 5 日收益或横截面排序标签；支持 `random_forest`、`lightgbm` 和 `lightgbm_ranker`，训练前把 `inf` 这类异常值转成缺失值，再交给中位数填补器。
 - `alpha-lab ml-alpha`: 输出 `ml_prediction_5d` 到新的因子表，例如 `data/processed/factors_free_50_ml.parquet`。
+- `alpha-lab tune-lightgbm`: 跑小型 LightGBM / LambdaRank 网格搜索，按样本外横截面 IC 和 ICIR 排序。
 - `configs/universe_free_50_ml.yaml`: 指向带 ML 因子的表，让排行榜、回测、Alpha Cluster 直接评估机器学习 alpha。
 
 ML 因子只在样本外测试窗口有值，所以 Alpha Cluster 对这类因子使用“有效预测期”做覆盖率和横截面区分度检查。

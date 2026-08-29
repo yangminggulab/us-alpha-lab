@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import html as html_lib
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
-
-from us_alpha_lab.alpha_registry import ALPHA_REGISTRY, enabled_alpha_specs
+from us_alpha_lab.alpha_registry import enabled_alpha_specs
 from us_alpha_lab.config import ResearchConfig
 
 # 流水线各步：标题、阶段描述、算法、输入、输出、命令行入口
@@ -29,8 +27,8 @@ _PIPELINE_STEPS = [
     },
     {
         "title": "③ 机器学习预测 ml-alpha（可选）",
-        "desc": "用随机森林以全部因子预测未来收益，产物作为新因子进入因子池。",
-        "algo": "Walk-forward 随机森林（300 棵树）→ SimpleImputer(median) → StandardScaler；滚动 train/test + embargo 防前视偏差",
+        "desc": "用随机森林或 LightGBM 以全部因子预测未来收益，产物作为新因子进入因子池。",
+        "algo": "Walk-forward ML 模型（random_forest / lightgbm）→ SimpleImputer(median)；滚动 train/test + embargo 防前视偏差",
         "inputs": "data/processed/factors.parquet",
         "outputs": "ml_prediction_5d 因子（写回 factors.parquet）",
         "cmd": "alpha-lab ml-alpha",
@@ -117,8 +115,8 @@ def _config_cards(cfg: ResearchConfig) -> str:
         ("因子数", str(len(enabled_alpha_specs()))),
     ]
     return "\n".join(
-        '<div class="card"><div class="label">{label}</div>'
-        '<div class="value">{value}</div></div>'.format(label=label, value=_escape(value))
+        f'<div class="card"><div class="label">{label}</div>'
+        f'<div class="value">{_escape(value)}</div></div>'
         for label, value in items
     )
 
@@ -188,7 +186,7 @@ def build_methodology_html(
     report_link: str | None = "research_report.html",
 ) -> Path:
     """Build a dynamic methodology/pipeline HTML from the current code state."""
-    generated_on = date.today().isoformat()
+    generated_on = datetime.now(timezone.utc).date().isoformat()
     steps = "\n".join(_step_card(step) for step in _PIPELINE_STEPS)
 
     total_enabled = len(enabled_alpha_specs())
