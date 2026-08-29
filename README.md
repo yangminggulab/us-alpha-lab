@@ -4,6 +4,17 @@
 
 > 仅用于学习和研究，不构成投资建议。真实交易前还需要严谨处理复权、幸存者偏差、交易成本、滑点、组合约束和样本外验证。
 
+## 在线报告
+
+- [报告入口页](https://yangminggulab.github.io/us-alpha-lab/)
+- [研究报告](https://yangminggulab.github.io/us-alpha-lab/research_report.html)
+- [方法说明](https://yangminggulab.github.io/us-alpha-lab/methodology.html)
+
+如果链接显示 404，需要在 GitHub 仓库 `Settings -> Pages` 里把发布源设为 `main` 分支的 `/(root)`。
+Pages 启用前，也可以用临时预览：
+[研究报告预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/research_report.html) /
+[方法说明预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/methodology.html)。
+
 ## 1. 准备环境
 
 ```bash
@@ -153,6 +164,39 @@ Massive API
 
 Massive 当前 Stocks Basic 免费层更适合先做最近 2 年日线研究；如果请求更早历史，接口可能只返回免费层允许的最近区间。
 默认配置会在每个 ticker 请求之间暂停一下，避免撞到免费版 `5 API Calls / Minute` 的限制。
+
+### 免费层批量拉取脚本
+
+如果想把免费层可用的日线数据尽量完整拉下来，可以用独立脚本按 ticker 续跑下载：
+
+```bash
+python scripts/harvest_massive_free.py \
+  --config configs/universe_free_50.yaml \
+  --rolling-free-window \
+  --end previous-weekday \
+  --output data/raw/daily_bars_free_50.parquet
+```
+
+脚本默认按 Massive Stocks Basic 免费层 `5 API Calls / Minute` 限速，并把每个 ticker
+先写入 `data/raw/massive_free_tier_shards/`，中断后再次运行会跳过已覆盖完整日期区间的 shard。
+正式跑之前可先检查计划：
+
+```bash
+python scripts/harvest_massive_free.py --dry-run --rolling-free-window
+```
+
+如果要先用 Massive 免费层的 reference data 发现 active 美股 universe，再批量抓取：
+
+```bash
+python scripts/harvest_massive_free.py \
+  --discover-active \
+  --rolling-free-window \
+  --end previous-weekday \
+  --output data/raw/daily_bars_massive_active_free.parquet
+```
+
+这会额外保存 `data/raw/massive_active_tickers.csv`。全 active universe 在免费层速率下会跑很久，
+可先加 `--max-tickers 100` 做小批量验证。
 
 ## 6. 下一步可以加什么
 
