@@ -15,7 +15,9 @@ from us_alpha_lab.factor_discovery import build_factor_discovery_report
 from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
 from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_results
 from us_alpha_lab.massive_data import fetch_daily_bars
+from us_alpha_lab.methodology import build_methodology_html
 from us_alpha_lab.modeling import generate_ml_predictions, train_model
+from us_alpha_lab.report import build_html_report
 from us_alpha_lab.visualization import (
     create_factor_charts,
     plot_backtest_drawdown,
@@ -148,6 +150,37 @@ def charts(
     )
     for path in paths:
         typer.echo(f"Saved {path}")
+
+
+@app.command("html-report")
+def html_report_cmd(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    horizon: int = typer.Option(5, help="Forward return horizon in trading days."),
+    top_n: int = typer.Option(5, help="Number of top factors to chart in the report."),
+    backtest_horizon: int = typer.Option(1, help="Forward return horizon for the quantile backtest."),
+    output_path: Path = typer.Option(Path("research_report.html"), help="Output HTML report path."),
+) -> None:
+    cfg = load_config(config)
+    factor_frame = pd.read_parquet(cfg.factors_path)
+    path = build_html_report(
+        factor_frame,
+        output_path=output_path,
+        horizon=horizon,
+        top_n=top_n,
+        backtest_horizon=backtest_horizon,
+    )
+    typer.echo(f"Saved HTML report to {path}")
+
+
+@app.command()
+def methodology(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    output_path: Path = typer.Option(Path("methodology.html"), help="Output methodology HTML path."),
+    report_link: str | None = typer.Option("research_report.html", help="Link back to research report (None to disable)."),
+) -> None:
+    cfg = load_config(config)
+    path = build_methodology_html(cfg, output_path=output_path, report_link=report_link)
+    typer.echo(f"Saved methodology HTML to {path}")
 
 
 @app.command()

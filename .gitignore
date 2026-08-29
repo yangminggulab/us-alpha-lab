@@ -21,4 +21,6 @@ data/processed/
 data/models/
 reports/
 runs/
+logs/
+.claude/
 notebooks/.ipynb_checkpoints/

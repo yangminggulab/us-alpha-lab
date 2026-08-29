@@ -139,6 +139,7 @@ def fetch_active_ticker_universe(
     market: str,
     allowed_types: set[str],
     output_path: Path | None,
+    max_tickers: int | None,
 ) -> list[str]:
     params = {
         "market": market,
@@ -151,6 +152,7 @@ def fetch_active_ticker_universe(
     url: str | None = f"{MASSIVE_TICKERS_URL}?{urlencode(params)}"
     records: list[dict[str, Any]] = []
 
+    print(f"Discovering active {market} tickers from Massive reference data...")
     while url:
         limiter.wait()
         try:
@@ -166,6 +168,11 @@ def fetch_active_ticker_universe(
             if allowed_types and ticker_type not in allowed_types:
                 continue
             records.append(item)
+            if max_tickers is not None and len(records) >= max_tickers:
+                url = None
+                break
+        if url is None:
+            break
         next_url = payload.get("next_url")
         url = url_with_api_key(next_url, api_key) if next_url else None
 
@@ -173,7 +180,9 @@ def fetch_active_ticker_universe(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(records).to_csv(output_path, index=False)
 
-    return normalize_tickers(str(record["ticker"]) for record in records if record.get("ticker"))
+    tickers = normalize_tickers(str(record["ticker"]) for record in records if record.get("ticker"))
+    print(f"Discovered {len(tickers):,} active tickers.")
+    return tickers
 
 
 def shard_covers_window(path: Path, start: str, end: str) -> bool:
@@ -245,6 +254,26 @@ def write_parquet_atomically(frame: pd.DataFrame, path: Path) -> None:
     tmp_path.replace(path)
 
 
+def seed_checkpoint_shards(seed_paths: list[Path], checkpoint_dir: Path, force: bool = False) -> int:
+    seeded = 0
+    for seed_path in seed_paths:
+        if not seed_path.exists():
+            continue
+        frame = pd.read_parquet(seed_path)
+        if frame.empty or "ticker" not in frame.columns:
+            continue
+        frame["date"] = pd.to_datetime(frame["date"])
+        for ticker, group in frame.groupby("ticker"):
+            shard_path = ticker_shard_path(checkpoint_dir, str(ticker))
+            if shard_path.exists() and not force:
+                continue
+            write_parquet_atomically(group.sort_values("date").reset_index(drop=True), shard_path)
+            seeded += 1
+    if seeded:
+        print(f"Seeded {seeded:,} checkpoint shards from existing parquet data.")
+    return seeded
+
+
 def merge_shard_frame(path: Path, new_frame: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     frames = []
     if path.exists():
@@ -296,6 +325,7 @@ def resolve_tickers(
                 market=args.market,
                 allowed_types=resolve_allowed_types(args),
                 output_path=args.reference_output,
+                max_tickers=args.max_tickers,
             )
         )
     if not tickers:
@@ -341,8 +371,12 @@ def harvest(args: argparse.Namespace) -> int:
         print(f"Window: {start} -> {end}")
         print(f"Checkpoint dir: {checkpoint_dir}")
         print(f"Combined output: {output_path}")
+        if args.seed_from:
+            print(f"Seed from: {', '.join(str(path) for path in args.seed_from)}")
         print(f"Pause: {settings.pause_seconds:.2f}s between ticker requests")
         return 0
+
+    seed_checkpoint_shards(args.seed_from, checkpoint_dir, force=args.force_seed)
 
     if not args.combine_only:
         from massive import RESTClient
@@ -434,6 +468,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_CHECKPOINT_DIR,
         help="Per-ticker parquet checkpoint directory.",
+    )
+    parser.add_argument(
+        "--seed-from",
+        type=Path,
+        action="append",
+        default=[],
+        help="Existing combined parquet to split into per-ticker checkpoint shards before fetching.",
+    )
+    parser.add_argument(
+        "--force-seed",
+        action="store_true",
+        help="Overwrite checkpoint shards when seeding from existing parquet data.",
     )
     parser.add_argument("--output", type=Path, help="Combined parquet output path.")
     parser.add_argument("--force", action="store_true", help="Re-download existing complete shards.")

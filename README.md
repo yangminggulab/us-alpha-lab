@@ -1,8 +1,8 @@
 # US Alpha Lab
 
-一个美股量化研究毛坯房：用 Massive 拉 OHLCV 数据，做基础 alpha 因子，生成未来收益标签，再用机器学习做第一版预测实验。
+一个美股量化因子研究项目。**核心不是工具，而是一套研究思路：怎样系统地找到别人拿不到的 alpha。**
 
-> 仅用于学习和研究，不构成投资建议。真实交易前还需要严谨处理复权、幸存者偏差、交易成本、滑点、组合约束和样本外验证。
+> 仅供学习研究，不构成投资建议；历史表现不代表未来收益。真实交易前还需处理复权、幸存者偏差、交易成本、滑点、组合约束与样本外验证。
 
 ## 在线报告
 
@@ -10,199 +10,110 @@
 - [研究报告](https://yangminggulab.github.io/us-alpha-lab/research_report.html)
 - [方法说明](https://yangminggulab.github.io/us-alpha-lab/methodology.html)
 
-如果链接显示 404，需要在 GitHub 仓库 `Settings -> Pages` 里把发布源设为 `gh-pages` 分支的 `/(root)`。
-Pages 启用前，也可以用临时预览：
-[研究报告预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/research_report.html) /
-[方法说明预览](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/methodology.html)。
+（本地预览：[研究报告](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/research_report.html) / [方法说明](https://htmlpreview.github.io/?https://github.com/yangminggulab/us-alpha-lab/blob/main/methodology.html)）
 
-## 1. 准备环境
+---
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install ".[dev]"
-cp .env.example .env
+## 一、这项研究在做什么
+
+### 我们到底在找什么
+
+一句话答案：**找一个横截面信号 $s_{i,t}$，使正交化后的增量 IC 稳健为正。**
+
+$$
+\varepsilon_{i,t} = s_{i,t} - \sum_k \beta_k\, f_{k,i,t},\qquad
+\mathrm{IC_{orth}} = \mathrm{corr}\big(\varepsilon,\ \text{future return}\big)
+$$
+
+$f_k$ 是公共因子池，残差 $\varepsilon$ 才是别人拿不到、属于你自己的部分。**研究的产出 = 增量 IC，不是绝对 IC。** 动量、低波 IC 永远不低，但所有人都在用，没有研究价值；只有 $\mathrm{IC_{orth}} \neq 0$ 的信号才值得研究。
+
+### 研究逻辑链
+
+```
+数据（日线 OHLCV）
+  → 公共因子（动量/波动/量价/位置）
+  → 随机森林把所有因子"拧"成一个预测（样本外）
+  → 四关 + 增量关裁决：哪个因子值得进一步研究
 ```
 
-然后把 `.env` 里的 `MASSIVE_API_KEY` 换成你的 Massive key。Massive 官方 Python 客户端支持通过 `MASSIVE_API_KEY` 环境变量读取 key。
+每一步都对应一个明确的问题：
 
-## 2. 跑通第一条链路
+1. **数据**：从 Massive 免费层拉日线。
+2. **公共因子**：作为探针验证流水线、作为基线比较增量、作为底仓。它们本身不是 alpha。
+3. **机器学习因子**：随机森林做**回归**（预测连续收益，MSE 损失），输出当作一个因子按横截面**排名**消费——回归训练、排名消费，这是标准的因子研究框架。
+4. **裁决表**：信号关、单调关、净收益关、稳定关、增量关五关全过，才叫"可盈利候选"。
+
+### 几条目前的关键认识
+
+- **没有"每年都赚"的因子。** 年化夏普 1.0 的因子每 6 年也要亏一年。目标是"期望为正 + 可解释 + 知道何时失效"，不是"永远赚钱"。
+- **公共因子是标尺，不是猎物。** 它们的价值在于定义"什么才算新 alpha"，而不是本身赚钱。
+- **防前视是生死线。** walk-forward 滚动验证 + embargo + 特征滞后一天，三者缺一不可。
+- **随机森林学的是公共因子的非线性组合。** 真正的增量往往不在这里，而在新数据、交互项、新预测目标。
+
+### 当前研究状态
+
+在免费 50 支美股、约 2 年日线上：**五关裁决没有因子全过。** 最有价值的一条证据是随机森林因子 `ml_prediction_5d` 的原始 IC 为 +0.019，正交化后变成 −0.011——说明它的信号基本是公共因子的重组，剥掉公共部分后没有增量。这验证了增量关存在的意义：**诚实地说出"手里还没有别人拿不到的因子"，比自欺欺人地看绝对 IC 重要得多。**
+
+---
+
+## 二、研究路线（怎么做研究）
+
+1. **造新信号。** 四个来源，按壁垒递增：公共数据上的新公式 → 非线性交互项 → 新预测目标（波动、跳跃、成交量）→ 新数据（另类数据是真正的护城河）。
+2. **正交化验证。** 每个候选对公共因子池回归取残差，看 $\mathrm{IC_{orth}}$ 是否显著。残差 IC ≈ 0 说明只是公共因子的组合。
+3. **五关裁决。** 信号 / 单调 / 净收益 / 稳定 / 增量，全过才进入下一轮。
+4. **经济可解释 + 失效预案。** 能说清赚的是哪类钱（风险补偿 or 行为偏差）、知道什么情况下会亏，才配叫"你的 alpha"。
+
+---
+
+## 三、学习路线（怎么学）
+
+### 阶段一：数据与公共因子 —— 建立标尺
+
+- **概念**：日度横截面 Spearman IC、ICIR、分位数收益、因子自相关。
+- **代码**：`analysis.py`、`alpha_registry.py`、`feature_engineering.py`。
+- **产出认知**：公共因子是探针。动量、低波 IC 若为负，先怀疑数据或代码，而不是因子本身。
+
+### 阶段二：回测与多空组合 —— 预测力能否变成收益
+
+- **概念**：分位数多空、换手成本、年化夏普、最大回撤、Calmar、胜率。
+- **公式**：年化毛利 $\approx \mathrm{IC} \times \sqrt{\text{breadth}} \times \sigma_{截面}$，**盈利条件是毛利 > 换手成本**。
+- **代码**：`backtest.py`、`risk.py`、`benchmark.py`。
+- **产出认知**：信号强不等于赚钱，扣费后的夏普才决定一切。
+
+### 阶段三：机器学习因子 —— 回归不是分类
+
+- **概念**：MSE 损失下最优预测 = 条件期望 $\mathbb{E}[y|x]$；walk-forward + embargo 防前视；特征滞后。
+- **代码**：`modeling.py`、`validation.py`、`labels.py`。
+- **产出认知**：任务是回归、消费是排名，两者不冲突。
+
+### 阶段四：增量 IC 与正交化 —— 找自己的 alpha
+
+- **概念**：截面回归取残差、$\mathrm{IC_{orth}}$、多重检验偏差。
+- **代码**：`verdict.py` 的增量关。
+- **产出认知**：ML 因子大概率只是公共因子的重组，正交化会诚实地说出来。
+
+### 阶段五：可解释性与失效 —— 研究的护城河
+
+- **概念**：因子利润来源只有两类——风险补偿 vs 行为偏差；拥挤、行为演化、套利三个失效机制。
+- **产出认知**：统计可解释 ≠ 经济可解释。知道"赚的是谁的钱"和"什么时候会失效"，是别人写不进公式的部分。
+
+### 阶段六：模型进阶（下一步）
+
+- 随机森林 → **LightGBM**：表格数据上预测更准、训练更快、能直接优化排名（LambdaRank）、正则更精细。做法是**对比而不是替换**，用现成 walk-forward 框架比 OOS 的 IC / ICIR / 方向准确率。
+
+---
+
+## 四、复现与运行（最小命令）
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install ".[dev]"
+cp .env.example .env          # 填入 MASSIVE_API_KEY
+
 alpha-lab fetch --tickers AAPL,MSFT,NVDA --start 2024-08-15 --end 2026-08-14
 alpha-lab factors
-alpha-lab discover-factors --config configs/universe_free_50.yaml
-alpha-lab train
-alpha-lab ml-alpha --config configs/universe_free_50.yaml --output-path data/processed/factors_free_50_ml.parquet
-alpha-lab report
-alpha-lab charts
-alpha-lab backtest
-alpha-lab leaderboard --config configs/universe_free_50_ml.yaml
-alpha-lab alpha-cluster --config configs/universe_free_50_ml.yaml
-alpha-lab registry
-alpha-lab run-experiment
+alpha-lab ml-alpha --config configs/universe_free_50.yaml
+alpha-lab html-report
 ```
 
-生成文件：
-
-- `data/raw/daily_bars.parquet`: Massive 下载的日线 OHLCV
-- `data/processed/factors.parquet`: 因子表
-- `data/processed/factors_free_50_ml.parquet`: 带样本外机器学习预测的因子表
-- `data/models/latest_model.joblib`: 第一版机器学习模型
-- `reports/*.png`: 因子 IC、分位收益和累计多空收益图
-- `reports/backtest.parquet`: 分位多空回测结果
-- `reports/factor_discovery/factor_candidates.csv`: 候选因子覆盖率、IC、ICIR 快速筛选表
-- `reports/leaderboard/factor_leaderboard.csv`: 因子 IC + 回测排行榜
-- `reports/alpha_cluster/alpha_cluster_report.csv`: alpha 错误诊断报告
-- `runs/<timestamp>_<name>/`: 一次完整实验的配置、报告、图表和指标快照
-
-## 3. 项目结构
-
-```text
-US Alpha Lab
-│
-├── 项目说明与工程配置
-│   ├── README.md
-│   ├── docs/architecture.md
-│   ├── docs/quant-infra.md
-│   ├── pyproject.toml
-│   ├── .gitignore
-│   ├── .env.example
-│   └── .env                 # 本地密钥，不进 Git
-│
-├── 数据与实验配置
-│   ├── configs/universe.yaml
-│   ├── configs/universe_free_50.yaml
-│   ├── configs/universe_free_50_ml.yaml
-│   └── configs/experiments/free_alpha.yaml
-│
-├── 数据获取与标准化
-│   ├── src/us_alpha_lab/config.py
-│   └── src/us_alpha_lab/massive_data.py
-│
-├── Alpha 因子生成
-│   ├── src/us_alpha_lab/alpha_registry.py
-│   ├── src/us_alpha_lab/operators.py
-│   ├── src/us_alpha_lab/formula_factors.py
-│   ├── src/us_alpha_lab/feature_engineering.py
-│   ├── src/us_alpha_lab/factors.py
-│   ├── src/us_alpha_lab/factor_discovery.py
-│   └── src/us_alpha_lab/labels.py
-│
-├── 因子评估与回测
-│   ├── src/us_alpha_lab/analysis.py
-│   ├── src/us_alpha_lab/backtest.py      # 回测核心：配置、权重、基准、绩效
-│   └── src/us_alpha_lab/leaderboard.py
-│
-├── 风险与基准
-│   ├── src/us_alpha_lab/risk.py
-│   └── src/us_alpha_lab/benchmark.py
-│
-├── Alpha 检测集群
-│   ├── src/us_alpha_lab/diagnostics.py
-│   └── src/us_alpha_lab/alpha_cluster.py
-│
-├── 机器学习实验
-│   ├── src/us_alpha_lab/validation.py
-│   └── src/us_alpha_lab/modeling.py     # walk-forward 训练，输出 ml_prediction_5d
-│
-├── 可视化与命令入口
-│   ├── src/us_alpha_lab/visualization.py
-│   ├── src/us_alpha_lab/cli.py
-│   └── src/us_alpha_lab/__init__.py
-│
-├── 测试
-│   └── tests/test_*.py
-│
-├── 实验管理
-│   └── runs/<timestamp>_<name>/
-│
-└── 本地产物
-    ├── data/
-    ├── reports/
-    ├── .venv/
-    └── build/
-```
-
-## 4. 框架数据流
-
-```text
-Massive API
-  -> data/raw/daily_bars.parquet
-  -> alpha-lab factors
-  -> data/processed/factors.parquet
-  -> alpha-lab discover-factors
-  -> reports/factor_discovery/factor_candidates.csv
-  -> alpha-lab ml-alpha
-  -> data/processed/factors_free_50_ml.parquet
-  -> alpha-lab report / charts / backtest / train
-  -> reports/ + data/models/
-```
-
-当前设计是四层：
-
-- 数据层：`massive_data.py` 只负责下载和保存原始 OHLCV。
-- 因子层：`operators.py` 提供通用算子，`formula_factors.py` 管公式因子，`feature_engineering.py` 做清洗和横截面特征。
-- 研究层：`analysis.py` 看 IC 和分位收益，`backtest.py` 看组合结果。
-- 学习层：`modeling.py` 用因子预测未来收益，后面再加 walk-forward / purged CV。
-
-更完整的框架说明见 [docs/architecture.md](docs/architecture.md)。
-计算基础设施、CUDA/GPU 加速路线见 [docs/quant-infra.md](docs/quant-infra.md)。
-
-## 5. 第一版研究假设
-
-当前因子偏教学版，方便你先理解完整流程：
-
-- 短期反转：`reversal_1d`
-- 中期动量：`momentum_21d`
-- 量能变化：`volume_z_21d`
-- 波动率：`volatility_21d`
-- 日内位置：`close_to_high`, `close_to_low`
-- 公式候选：`alpha_ma_gap_21d`, `alpha_price_to_21d_high`, `alpha_liquidity_quality_21d`
-
-默认标签是未来 5 个交易日收益 `future_return_5d`。模型训练时按日期切分训练集和测试集，避免随机打散导致时间泄漏。
-
-Massive 当前 Stocks Basic 免费层更适合先做最近 2 年日线研究；如果请求更早历史，接口可能只返回免费层允许的最近区间。
-默认配置会在每个 ticker 请求之间暂停一下，避免撞到免费版 `5 API Calls / Minute` 的限制。
-
-### 免费层批量拉取脚本
-
-如果想把免费层可用的日线数据尽量完整拉下来，可以用独立脚本按 ticker 续跑下载：
-
-```bash
-python scripts/harvest_massive_free.py \
-  --config configs/universe_free_50.yaml \
-  --rolling-free-window \
-  --end previous-weekday \
-  --output data/raw/daily_bars_free_50.parquet
-```
-
-脚本默认按 Massive Stocks Basic 免费层 `5 API Calls / Minute` 限速，并把每个 ticker
-先写入 `data/raw/massive_free_tier_shards/`，中断后再次运行会跳过已覆盖完整日期区间的 shard。
-正式跑之前可先检查计划：
-
-```bash
-python scripts/harvest_massive_free.py --dry-run --rolling-free-window
-```
-
-如果要先用 Massive 免费层的 reference data 发现 active 美股 universe，再批量抓取：
-
-```bash
-python scripts/harvest_massive_free.py \
-  --discover-active \
-  --rolling-free-window \
-  --end previous-weekday \
-  --output data/raw/daily_bars_massive_active_free.parquet
-```
-
-这会额外保存 `data/raw/massive_active_tickers.csv`。全 active universe 在免费层速率下会跑很久，
-可先加 `--max-tickers 100` 做小批量验证。
-
-## 6. 下一步可以加什么
-
-- 加入 Massive Flat Files，批量下载更大的历史数据
-- 接入公司基本面、新闻、财报事件
-- 做 cross-sectional IC、分层回测和交易成本
-- 做 walk-forward 验证
-- 从 scikit-learn 扩展到 LightGBM / XGBoost
-- 建立 benchmark 和 GPU smoke test，再逐步验证 RAPIDS/cuDF、Polars GPU、Dask-CUDA
+产物说明、免费层批量拉数脚本（`scripts/harvest_massive_free.py` 与 launchd 后台脚本）详见各脚本头部注释与 `docs/`。

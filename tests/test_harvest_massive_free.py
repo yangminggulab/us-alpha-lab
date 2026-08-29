@@ -57,3 +57,22 @@ def test_url_with_api_key_replaces_or_adds_key() -> None:
     url = "https://api.massive.com/v3/reference/tickers?cursor=abc&apiKey=old"
 
     assert harvest_massive_free.url_with_api_key(url, "new").endswith("cursor=abc&apiKey=new")
+
+
+def test_seed_checkpoint_shards_reuses_existing_panel(tmp_path: Path) -> None:
+    seed = tmp_path / "existing.parquet"
+    checkpoint_dir = tmp_path / "shards"
+    frame = pd.DataFrame(
+        {
+            "ticker": ["AAPL", "AAPL", "MSFT"],
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-01"]),
+            "close": [1.0, 2.0, 3.0],
+        }
+    )
+    frame.to_parquet(seed, index=False)
+
+    seeded = harvest_massive_free.seed_checkpoint_shards([seed], checkpoint_dir)
+
+    assert seeded == 2
+    assert (checkpoint_dir / "AAPL.parquet").exists()
+    assert (checkpoint_dir / "MSFT.parquet").exists()
