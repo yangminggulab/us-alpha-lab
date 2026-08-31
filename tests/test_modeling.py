@@ -94,6 +94,34 @@ def test_make_training_frame_can_use_cross_sectional_zscore_label() -> None:
     assert training[label_column].notna().sum() > 0
 
 
+def test_make_training_frame_can_use_top_bottom_label() -> None:
+    dates = pd.date_range("2024-01-01", periods=12, freq="B")
+    tickers = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    rows = []
+    for date_index, date in enumerate(dates):
+        for ticker_index, ticker in enumerate(tickers):
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "date": date,
+                    "close": 100 + date_index * (ticker_index + 1),
+                    "dollar_volume": 1_000_000 + ticker_index,
+                    "dollar_volume_rank": (ticker_index + 1) / len(tickers),
+                }
+            )
+
+    training, _, label_column = make_training_frame(
+        pd.DataFrame(rows),
+        horizon=2,
+        label_transform="top_bottom",
+    )
+
+    assert label_column == "future_return_2d_top_bottom"
+    assert set(training[label_column].dropna().unique()) <= {0.0, 4.0}
+    assert training.groupby("date")[label_column].count().max() <= 2
+
+
 def test_normalize_model_name_accepts_lightgbm_ranker_aliases() -> None:
     assert normalize_model_name("lightboost") == "lightgbm"
     assert normalize_model_name("lambdarank") == "lightgbm_ranker"
+    assert normalize_model_name("rank_xendcg") == "lightgbm_xendcg_ranker"

@@ -520,6 +520,8 @@ def build_html_report(
     output_path: str | Path = "research_report.html",
     horizon: int = 5,
     top_n: int = 5,
+    factor_top_n: int | None = None,
+    verdict_top_n: int | None = None,
     backtest_horizon: int = 1,
     quantiles: int = 5,
     cost_bps: float = 5.0,
@@ -532,12 +534,21 @@ def build_html_report(
     ic_summary = visualization.plot_ic_summary(factors, None, horizon=horizon)
     factor_blocks = _factor_blocks(factors, ic_report, horizon, top_n)
 
+    evaluation_ic_report = ic_report.head(factor_top_n) if factor_top_n is not None else ic_report
+    evaluation_factors = evaluation_ic_report["factor"].astype(str).tolist()
+    evaluation_scope = (
+        f"IC 排名前 {factor_top_n} 个因子"
+        if factor_top_n is not None
+        else "全部因子"
+    )
+
     leaderboard_frame, results = build_factor_leaderboard(
         factors,
         ic_report=ic_report,
         horizon=backtest_horizon,
         quantiles=quantiles,
         cost_bps=cost_bps,
+        factor_columns=evaluation_factors,
     )
     if leaderboard_frame.empty:
         raise RuntimeError("回测没有产出有效因子，无法生成回测区。请检查因子数据。")
@@ -554,9 +565,20 @@ def build_html_report(
     ic_table_html = _table_html(ic_report, _IC_CN)
     leaderboard_html = _table_html(leaderboard_frame.head(10), _LEADERBOARD_CN)
 
+    effective_verdict_top_n = verdict_top_n if verdict_top_n is not None else factor_top_n
+    verdict_ic_report = (
+        ic_report.head(effective_verdict_top_n)
+        if effective_verdict_top_n is not None
+        else ic_report
+    )
+    verdict_scope = (
+        f"IC 排名前 {effective_verdict_top_n} 个因子"
+        if effective_verdict_top_n is not None
+        else "全部因子"
+    )
     verdict_frame = build_factor_verdict(
         factors,
-        ic_report=ic_report,
+        ic_report=verdict_ic_report,
         leaderboard=leaderboard_frame,
         horizon=horizon,
         quantiles=quantiles,
@@ -616,10 +638,10 @@ def build_html_report(
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>
-    <p class="guide">五关漏斗：信号关（ICIR≥0.5 且 |IC t值|≥2，t 值已做 Newey–West 自相关修正）→ 单调关（分位数收益单调）→ 净收益关（扣费后夏普≥1 且回撤&lt;30%）→ 稳定关（分年 IC 同号率≥80%）→ 增量关（对公共因子池正交化后残差 IC≥0.01 且正交 IR≥0.3）。五关全过才判"可盈利候选"。</p>
+    <p class="guide">五关漏斗：信号关（ICIR≥0.5 且 |IC t值|≥2，t 值已做 Newey–West 自相关修正）→ 单调关（分位数收益单调）→ 净收益关（扣费后夏普≥1 且回撤&lt;30%）→ 稳定关（分年 IC 同号率≥80%）→ 增量关（对公共因子池正交化后残差 IC≥0.01 且正交 IR≥0.3）。当前裁决范围：{html_lib.escape(verdict_scope)}。</p>
     {verdict_summary_html}
     <details>
-        <summary>查看全部因子四关判定明细</summary>
+        <summary>查看{html_lib.escape(verdict_scope)}五关判定明细</summary>
         {verdict_html}
     </details>
 </div>
@@ -643,7 +665,7 @@ def build_html_report(
 
 <div class="section" id="backtest">
     <h2>回测验证</h2>
-    <p class="guide">把因子分层做多空组合（每 {backtest_horizon} 个交易日调仓，考虑换手成本），验证"预测力"能否变成真实收益。下表是最优 {top_n} 因子的回测指标。</p>
+    <p class="guide">把因子分层做多空组合（每 {backtest_horizon} 个交易日调仓，考虑换手成本），验证"预测力"能否变成真实收益。当前回测范围：{html_lib.escape(evaluation_scope)}；下表展示该范围内排名靠前的因子。</p>
     {leaderboard_html}
     <h3>因子综合得分对比</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">

@@ -82,9 +82,10 @@ LightGBM 特有：**leaf-wise 生长**（每次分裂全局最优叶）+ **直�
 [modeling.py:60](modeling.py:60)
 
 ```python
-LGBMRegressor(n_estimators=400, learning_rate=0.03, num_leaves=31,
-              min_child_samples=50, subsample=0.85, colsample_bytree=0.85,
-              reg_alpha=0.1, reg_lambda=1.0)
+LGBMRegressor(n_estimators=3000, learning_rate=0.03, num_leaves=31,
+              max_depth=6, min_child_samples=100,
+              subsample=0.8, bagging_freq=1, colsample_bytree=0.8,
+              min_gain_to_split=0.01, reg_alpha=0.1, reg_lambda=5.0)
 ```
 
 ### 学习目标（面试能讲出的点）
@@ -94,6 +95,9 @@ LGBMRegressor(n_estimators=400, learning_rate=0.03, num_leaves=31,
 - [ ] 树多了为什么过拟合（模型复杂度 ↑ → 方差 ↑）
 - [ ] **leaf-wise vs level-wise**：leaf-wise 拟合更快但更容易过拟合，所以靠 `num_leaves` + `min_child_samples` 约束
 - [ ] `num_leaves=31` ≈ 满二叉树 depth 5，改大 = 模型变复杂
+- [ ] `bagging_freq=1` 为什么要和 `subsample` 一起开，否则行采样不会按预期生效
+- [ ] `rank_xendcg` 与 `lambdarank` 都是排序目标，适合直接优化每日横截面排序
+- [ ] `top_bottom` 标签为什么丢掉中间分位：中间股票未来收益噪声最大，先让模型学头尾差异
 - [ ] `reg_alpha` / `reg_lambda` 正则项在约束什么（L1/L2 罚权重）
 - [ ] 为什么 LGBM 也**不需要** `StandardScaler`（对比 PyTorch/MLP 需要）
 
@@ -101,7 +105,8 @@ LGBMRegressor(n_estimators=400, learning_rate=0.03, num_leaves=31,
 
 1. 把 `learning_rate` 改 0.3（同时不动 `n_estimators`），看验证集先降后升 —— 练"此消彼长"
 2. `num_leaves` = 8 vs 512，看谁过拟合 —— 练"leaf-wise 为什么容易过拟合"
-3. 把 `n_estimators` 减到 100、`learning_rate` 提到 0.3，对比 R² —— 练"调参 trade-off"
+3. 对比 `lightgbm_ranker + quantile` 和 `rank_xendcg + top_bottom`，看 OOS IC / ICIR —— 练"预测收益 vs 预测排序"
+4. 把 `n_estimators` 减到 100、`learning_rate` 提到 0.3，对比 R² —— 练"调参 trade-off"
 
 ---
 

@@ -32,7 +32,7 @@
 alpha-lab factors
 alpha-lab discover-factors --config configs/universe_free_50.yaml
 alpha-lab ml-alpha --config configs/universe_free_50.yaml
-alpha-lab tune-lightgbm --config configs/universe_sp500.yaml --max-trials 24
+alpha-lab tune-lightgbm --config configs/universe_sp500.yaml --max-trials 48
 alpha-lab leaderboard --config configs/universe_free_50_ml.yaml
 ```
 

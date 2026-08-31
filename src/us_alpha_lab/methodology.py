@@ -7,57 +7,69 @@ from pathlib import Path
 from us_alpha_lab.alpha_registry import enabled_alpha_specs
 from us_alpha_lab.config import ResearchConfig
 
+
 # 流水线各步：标题、阶段描述、算法、输入、输出、命令行入口
-_PIPELINE_STEPS = [
-    {
-        "title": "① 数据获取 fetch",
-        "desc": "从行情数据源下载美股日线行情，落盘为原始 Parquet。",
-        "algo": "Massive API → 日线 OHLCV（open/high/low/close/volume/vwap）",
-        "inputs": "tickers、start、end、timespan、multiplier",
-        "outputs": "data/raw/daily_bars.parquet",
-        "cmd": "alpha-lab fetch",
-    },
-    {
-        "title": "② 因子计算 factors",
-        "desc": "在原始行情上叠加全部已启用因子，并计算横截面排名与 z-score。",
-        "algo": "公式因子（动量/波动/量价/位置等）+ add_cross_sectional_ranks（截面分位数排名 + z-score）",
-        "inputs": "data/raw/daily_bars.parquet",
-        "outputs": "data/processed/factors.parquet",
-        "cmd": "alpha-lab factors",
-    },
-    {
-        "title": "③ 机器学习预测 ml-alpha（可选）",
-        "desc": "用随机森林或 LightGBM 以全部因子预测未来收益，产物作为新因子进入因子池。",
-        "algo": "Walk-forward ML 模型（random_forest / lightgbm）→ SimpleImputer(median)；滚动 train/test + embargo 防前视偏差",
-        "inputs": "data/processed/factors.parquet",
-        "outputs": "ml_prediction_5d 因子（写回 factors.parquet）",
-        "cmd": "alpha-lab ml-alpha",
-    },
-    {
-        "title": "④ 因子检验 IC 分析",
-        "desc": "对每个因子计算对未来收益的预测力指标，筛出候选。",
-        "algo": "Spearman IC（截面单调相关）→ IC_IR（IC 均值/标准差）→ 分位数收益 → discovery_score 排序",
-        "inputs": "data/processed/factors.parquet",
-        "outputs": "IC 报告 / 分位数收益表",
-        "cmd": "alpha-lab discover-factors / report",
-    },
-    {
-        "title": "⑤ 组合回测 backtest",
-        "desc": "把因子分层做多空组合，验证预测力能否转化为真实收益。",
-        "algo": "每日按因子分位数分层 → Top−Bottom 多空组合 → 换手成本扣减 → 基准对比（等权）→ 风险指标（回撤/夏普/IR）",
-        "inputs": "data/processed/factors.parquet + IC 报告",
-        "outputs": "leaderboard（综合得分 score）/ 每日收益序列 / 回测指标",
-        "cmd": "alpha-lab leaderboard / backtest",
-    },
-    {
-        "title": "⑥ 结果汇总 html-report",
-        "desc": "把结论、候选因子、图表、回测聚合到一份自包含 HTML。",
-        "algo": "matplotlib 图表（中文注释，base64 内嵌）→ 单文件 HTML（结论优先）",
-        "inputs": "IC 报告 + leaderboard + 图表",
-        "outputs": "reports/research_report.html",
-        "cmd": "alpha-lab html-report",
-    },
-]
+def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
+    raw_path = str(cfg.raw_path)
+    factors_path = str(cfg.factors_path)
+    return [
+        {
+            "title": "① 数据获取 fetch",
+            "desc": "从行情数据源下载美股日线行情，落盘为原始 Parquet。",
+            "algo": "Massive API → 日线 OHLCV（open/high/low/close/volume/vwap）",
+            "inputs": "tickers、start、end、timespan、multiplier",
+            "outputs": raw_path,
+            "cmd": "alpha-lab fetch --config <config>",
+        },
+        {
+            "title": "② 因子计算 factors",
+            "desc": "在原始行情上叠加全部已启用因子，并计算横截面排名与 z-score。",
+            "algo": "公式因子（动量/波动/量价/位置等）+ add_cross_sectional_ranks（截面分位数排名 + z-score）",
+            "inputs": raw_path,
+            "outputs": factors_path,
+            "cmd": "alpha-lab factors --config <config>",
+        },
+        {
+            "title": "③ K 线路径 token（实验）",
+            "desc": "把 OHLCV 路径离散成 K 线 token，生成独立的路径表征因子，不覆盖主因子池。",
+            "algo": "涨跌幅桶 + 振幅桶 + 成交量冲击桶 + 收盘位置桶 → 20/60 日 entropy、n-gram、状态转移、路径相似度",
+            "inputs": raw_path,
+            "outputs": "data/processed/kline_sequence_factors.parquet",
+            "cmd": "alpha-lab kline-factors --config <config>",
+        },
+        {
+            "title": "④ 机器学习预测 ml-alpha（可选）",
+            "desc": "用随机森林或 LightGBM 以全部因子预测未来收益，产物作为新因子进入因子池。",
+            "algo": "Walk-forward ML 模型（random_forest / lightgbm / LambdaRank / rank_xendcg）→ SimpleImputer(median)；滚动 train/test + embargo 防前视偏差",
+            "inputs": factors_path,
+            "outputs": "ml_prediction_5d 因子（写回 factors.parquet 或指定 output-path）",
+            "cmd": "alpha-lab ml-alpha --config <config>",
+        },
+        {
+            "title": "⑤ 因子检验 IC 分析",
+            "desc": "对每个因子计算对未来收益的预测力指标，筛出候选。",
+            "algo": "Spearman IC（截面单调相关）→ IC_IR（IC 均值/标准差）→ 分位数收益 → discovery_score 排序",
+            "inputs": factors_path,
+            "outputs": "IC 报告 / 分位数收益表",
+            "cmd": "alpha-lab discover-factors --config <config>",
+        },
+        {
+            "title": "⑥ 组合回测 backtest",
+            "desc": "把因子分层做多空组合，验证预测力能否转化为真实收益。",
+            "algo": "每日按因子分位数分层 → Top−Bottom 多空组合 → 换手成本扣减 → 基准对比（等权）→ 风险指标（回撤/夏普/IR）",
+            "inputs": f"{factors_path} + IC 报告",
+            "outputs": "leaderboard（综合得分 score）/ 每日收益序列 / 回测指标",
+            "cmd": "alpha-lab leaderboard --config <config>",
+        },
+        {
+            "title": "⑦ 结果汇总 html-report",
+            "desc": "把结论、候选因子、图表、回测聚合到一份自包含 HTML。",
+            "algo": "matplotlib 图表（中文注释，base64 内嵌）→ 单文件 HTML（结论优先）",
+            "inputs": "IC 报告 + leaderboard + 图表",
+            "outputs": "research_report.html",
+            "cmd": "alpha-lab html-report --config <config>",
+        },
+    ]
 
 
 def _escape(value: object) -> str:
@@ -106,9 +118,15 @@ def _factor_table() -> str:
     return f"<table class='dataframe'>{header}<tbody>{''.join(body_rows)}</tbody></table>"
 
 
+def _ticker_summary(tickers: list[str], preview: int = 10) -> str:
+    shown = "、".join(tickers[:preview])
+    suffix = "..." if len(tickers) > preview else ""
+    return f"{len(tickers)} 个（{shown}{suffix}）"
+
+
 def _config_cards(cfg: ResearchConfig) -> str:
     items = [
-        ("标的", "、".join(cfg.tickers)),
+        ("配置标的", _ticker_summary(cfg.tickers)),
         ("起始日期", cfg.start),
         ("结束日期", cfg.end),
         ("K 线周期", f"{cfg.multiplier} {cfg.timespan}"),
@@ -187,7 +205,8 @@ def build_methodology_html(
 ) -> Path:
     """Build a dynamic methodology/pipeline HTML from the current code state."""
     generated_on = datetime.now(timezone.utc).date().isoformat()
-    steps = "\n".join(_step_card(step) for step in _PIPELINE_STEPS)
+    pipeline_steps = _pipeline_steps(cfg)
+    steps = "\n".join(_step_card(step) for step in pipeline_steps)
 
     total_enabled = len(enabled_alpha_specs())
     ml_enabled = any(spec.source == "local_ml" for spec in enabled_alpha_specs())
@@ -228,7 +247,7 @@ def build_methodology_html(
 
 <div class="section">
     <h2>研究流水线</h2>
-    <p class="desc">数据从原始行情流转到最终报告，共 {len(_PIPELINE_STEPS)} 步。每一步标注了算法、输入、输出与命令行入口。</p>
+    <p class="desc">数据从原始行情流转到最终报告，共 {len(pipeline_steps)} 步。每一步标注了算法、输入、输出与命令行入口。</p>
     {steps}
     {ml_note}
 </div>

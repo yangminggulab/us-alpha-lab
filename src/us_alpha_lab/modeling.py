@@ -41,6 +41,11 @@ def normalize_model_name(model_name: str) -> ModelName:
         "lgbm_ranker": "lightgbm_ranker",
         "lightgbm_ranker": "lightgbm_ranker",
         "ranker": "lightgbm_ranker",
+        "rank_xendcg": "lightgbm_xendcg_ranker",
+        "xendcg": "lightgbm_xendcg_ranker",
+        "xe_ndcg": "lightgbm_xendcg_ranker",
+        "lightgbm_xendcg": "lightgbm_xendcg_ranker",
+        "lightgbm_xendcg_ranker": "lightgbm_xendcg_ranker",
     }
     if normalized not in aliases:
         allowed = ", ".join(sorted(set(aliases.values())))
@@ -48,9 +53,13 @@ def normalize_model_name(model_name: str) -> ModelName:
     return aliases[normalized]
 
 
+def _is_lightgbm_ranker(model_name: str) -> bool:
+    return normalize_model_name(model_name) in {"lightgbm_ranker", "lightgbm_xendcg_ranker"}
+
+
 def make_model_pipeline(random_state: int = 42, model_name: str = "random_forest") -> Pipeline:
     model_name = normalize_model_name(model_name)
-    if model_name == "lightgbm_ranker":
+    if _is_lightgbm_ranker(model_name):
         raise ValueError("Use fit_predict_model for lightgbm_ranker because it requires date groups.")
     if model_name == "lightgbm":
         try:
@@ -66,14 +75,17 @@ def make_model_pipeline(random_state: int = 42, model_name: str = "random_forest
                     "model",
                     LGBMRegressor(
                         objective="regression",
-                        n_estimators=1000,
+                        n_estimators=3000,
                         learning_rate=0.03,
                         num_leaves=31,
-                        min_child_samples=50,
-                        subsample=0.85,
-                        colsample_bytree=0.85,
+                        max_depth=6,
+                        min_child_samples=100,
+                        subsample=0.8,
+                        bagging_freq=1,
+                        colsample_bytree=0.8,
+                        min_gain_to_split=0.01,
                         reg_alpha=0.1,
-                        reg_lambda=1.0,
+                        reg_lambda=5.0,
                         random_state=random_state,
                         n_jobs=-1,
                         verbosity=-1,
@@ -149,12 +161,15 @@ def _lightgbm_params(
     overrides: dict[str, float | int | str] | None = None,
 ) -> dict[str, float | int | str]:
     common: dict[str, float | int | str] = {
-        "n_estimators": 1000,
+        "n_estimators": 3000,
         "learning_rate": 0.03,
         "num_leaves": 31,
+        "max_depth": 6,
         "min_child_samples": 100,
         "subsample": 0.8,
+        "bagging_freq": 1,
         "colsample_bytree": 0.8,
+        "min_gain_to_split": 0.01,
         "reg_alpha": 0.1,
         "reg_lambda": 5.0,
         "random_state": random_state,
@@ -163,6 +178,8 @@ def _lightgbm_params(
     }
     if model_name == "lightgbm_ranker":
         params = {**common, "objective": "lambdarank", "metric": "ndcg"}
+    elif model_name == "lightgbm_xendcg_ranker":
+        params = {**common, "objective": "rank_xendcg", "metric": "ndcg"}
     else:
         params = {**common, "objective": "regression", "metric": "l2"}
     if overrides:
@@ -204,7 +221,7 @@ def fit_predict_model(
     callbacks = []
     fit_kwargs: dict[str, object] = {}
 
-    if model_name == "lightgbm_ranker":
+    if _is_lightgbm_ranker(model_name):
         model = LGBMRanker(**_lightgbm_params(model_name, random_state, model_params))
         fit_kwargs["group"] = _date_group_sizes(fit)
         fit_y = fit[label_column].astype(int)
@@ -278,6 +295,15 @@ def _prediction_metrics(
     return metrics
 
 
+def _finite_metric(metrics: dict[str, float | str], name: str, default: float = 0.0) -> float:
+    value = metrics.get(name, default)
+    try:
+        metric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return metric if np.isfinite(metric) else default
+
+
 def train_model(
     factors: pd.DataFrame,
     model_path: str | Path,
@@ -288,7 +314,7 @@ def train_model(
     model_params: dict[str, float | int | str] | None = None,
 ) -> dict[str, float | str]:
     model_name = normalize_model_name(model_name)
-    if model_name == "lightgbm_ranker" and label_transform == "return":
+    if _is_lightgbm_ranker(model_name) and label_transform == "return":
         label_transform = "quantile"
     training, feature_columns, label_column = make_training_frame(
         factors,
@@ -354,7 +380,7 @@ def generate_ml_predictions(
 ) -> tuple[pd.DataFrame, dict[str, float | str]]:
     """Generate out-of-sample walk-forward ML predictions and append as an alpha column."""
     model_name = normalize_model_name(model_name)
-    if model_name == "lightgbm_ranker" and label_transform == "return":
+    if _is_lightgbm_ranker(model_name) and label_transform == "return":
         label_transform = "quantile"
     prediction_column = prediction_column or f"ml_prediction_{horizon}d"
     training, feature_columns, label_column = make_training_frame(
@@ -456,39 +482,99 @@ def tune_lightgbm(
 ) -> pd.DataFrame:
     """Run a compact LightGBM search scored by out-of-sample cross-sectional IC."""
     grid = []
-    for num_leaves, min_child_samples, learning_rate, fraction in product(
-        (15, 31, 63),
-        (100, 300),
-        (0.01, 0.03),
+    for num_leaves, max_depth, min_child_samples, learning_rate, fraction, min_gain_to_split in product(
+        (7, 15, 31),
+        (3, 5, 7),
+        (200, 500, 1000),
+        (0.005, 0.01, 0.03),
         (0.7, 0.9),
+        (0.0, 0.01),
     ):
         grid.extend(
             [
-                ("lightgbm", "zscore", num_leaves, min_child_samples, learning_rate, fraction),
-                ("lightgbm", "quantile", num_leaves, min_child_samples, learning_rate, fraction),
+                (
+                    "lightgbm",
+                    "zscore",
+                    num_leaves,
+                    max_depth,
+                    min_child_samples,
+                    learning_rate,
+                    fraction,
+                    min_gain_to_split,
+                ),
+                (
+                    "lightgbm",
+                    "top_bottom",
+                    num_leaves,
+                    max_depth,
+                    min_child_samples,
+                    learning_rate,
+                    fraction,
+                    min_gain_to_split,
+                ),
                 (
                     "lightgbm_ranker",
                     "quantile",
                     num_leaves,
+                    max_depth,
                     min_child_samples,
                     learning_rate,
                     fraction,
+                    min_gain_to_split,
+                ),
+                (
+                    "lightgbm_xendcg_ranker",
+                    "quantile",
+                    num_leaves,
+                    max_depth,
+                    min_child_samples,
+                    learning_rate,
+                    fraction,
+                    min_gain_to_split,
+                ),
+                (
+                    "lightgbm_xendcg_ranker",
+                    "top_bottom",
+                    num_leaves,
+                    max_depth,
+                    min_child_samples,
+                    learning_rate,
+                    fraction,
+                    min_gain_to_split,
                 ),
             ]
         )
     rows = []
-    for trial, (model_name, label_transform, num_leaves, min_child_samples, learning_rate, fraction) in enumerate(
-        grid[:max_trials],
+    if max_trials > 0 and max_trials < len(grid):
+        trial_indices = np.linspace(0, len(grid) - 1, num=max_trials, dtype=int).tolist()
+        trial_grid = [grid[index] for index in dict.fromkeys(trial_indices)]
+    else:
+        trial_grid = grid
+    for trial, (
+        model_name,
+        label_transform,
+        num_leaves,
+        max_depth,
+        min_child_samples,
+        learning_rate,
+        fraction,
+        min_gain_to_split,
+    ) in enumerate(
+        trial_grid,
         start=1,
     ):
-        if model_name == "lightgbm_ranker" and label_transform != "quantile":
+        if _is_lightgbm_ranker(model_name) and label_transform not in {"quantile", "top_bottom"}:
             continue
         params = {
+            "n_estimators": 3000,
             "num_leaves": num_leaves,
+            "max_depth": max_depth,
             "min_child_samples": min_child_samples,
             "learning_rate": learning_rate,
             "subsample": fraction,
+            "bagging_freq": 1,
             "colsample_bytree": fraction,
+            "min_gain_to_split": min_gain_to_split,
         }
         _, metrics = generate_ml_predictions(
             factors,
@@ -500,8 +586,8 @@ def tune_lightgbm(
             label_transform=label_transform,
             model_params=params,
         )
-        score = float(metrics.get("prediction_mean_ic", 0.0)) + 0.25 * float(
-            metrics.get("prediction_ic_ir", 0.0)
+        score = _finite_metric(metrics, "prediction_mean_ic") + 0.25 * _finite_metric(
+            metrics, "prediction_ic_ir"
         )
         rows.append(
             {

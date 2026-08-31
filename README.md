@@ -64,7 +64,7 @@ $f_k$ 是公共因子池，残差 $\varepsilon$ 才是别人拿不到、属于�
 
 在免费 50 支美股、约 2 年日线上：**五关裁决没有因子全过。** 最有价值的一条证据是随机森林因子 `ml_prediction_5d` 的原始 IC 为 +0.019，正交化后变成 −0.011——说明它的信号基本是公共因子的重组，剥掉公共部分后没有增量。这验证了增量关存在的意义：**诚实地说出"手里还没有别人拿不到的因子"，比自欺欺人地看绝对 IC 重要得多。**
 
-在 S&P 500 日线、约 2 年样本上，数据已经扩到 `data/raw/daily_bars_sp500.parquet`，并进入 **LightGBM / LambdaRank** 阶段。第一版 LightGBM 回归可跑通，但 `ml_prediction_5d` 的 IC 仍偏弱；后续优化重点已经从"预测收益绝对值"切到"预测横截面排序"。
+在 S&P 500 日线、约 2 年样本上，数据已经扩到 `data/raw/daily_bars_sp500.parquet`，并进入 **LightGBM / LambdaRank / rank_xendcg** 阶段。第一版 LightGBM 回归可跑通，但 `ml_prediction_5d` 的 IC 仍偏弱；后续优化重点已经从"预测收益绝对值"切到"预测横截面排序"，并尝试只训练每日 top/bottom 分位来减少中间样本噪声。
 
 ---
 
@@ -96,7 +96,7 @@ $f_k$ 是公共因子池，残差 $\varepsilon$ 才是别人拿不到、属于�
 │   └─ 书：Grinold & Kahn《Active Portfolio Management》—— 从预测到仓位
 │
 ├─ 阶段三：机器学习因子 —— 回归不是分类
-│   ├─ 概念：MSE 下最优预测 = 条件期望 E[y|x]；选股消费横截面排序，比较 rank/quantile/LambdaRank
+│   ├─ 概念：MSE 下最优预测 = 条件期望 E[y|x]；选股消费横截面排序，比较 rank/quantile/top_bottom/LambdaRank/rank_xendcg
 │   ├─ 代码：modeling.py、validation.py、labels.py
 │   ├─ 认知：回归是基线，排名学习是下一层；全部用 walk-forward + embargo + 特征滞后一天验证
 │   └─ 书：★ López de Prado《Advances in Financial ML》—— 防泄露/多重检验/假回测
@@ -107,14 +107,22 @@ $f_k$ 是公共因子池，残差 $\varepsilon$ 才是别人拿不到、属于�
 │   ├─ 认知：ML 因子大概率是公共因子的重组，正交化会诚实说出来
 │   └─ 书：Bali《Empirical Asset Pricing》—— 横截面因子的正统研究法
 │
-├─ 阶段五：可解释性与失效 —— 研究的护城河
+├─ 阶段五：价格行为与交易员行为 —— 技术分析的量化版本
+│   ├─ 概念：突破、支撑、放量、缩量、跳空不是图形，而是订单/止损/流动性的痕迹
+│   ├─ K 线：OHLC 约束四元组 → 实体/影线/振幅/收盘位置 → 多根形态/路径 signature/事件时间
+│   ├─ 代码：factors.py 的 range_compression、volume_trend、gap_pressure、intraday_quality
+│   ├─ 认知：画线本身不是 alpha，背后的参与者行为和可验证 proxy 才是研究对象
+│   └─ 书：Hasbrouck《Empirical Market Microstructure》→ O'Hara《Market Microstructure Theory》
+│       —— 把图形背后的订单流、价差、冲击成本、信息交易讲清楚
+│
+├─ 阶段六：可解释性与失效 —— 研究的护城河
 │   ├─ 概念：利润来源两类（风险补偿 vs 行为偏差）；拥挤、行为演化、套利三个失效机制
 │   ├─ 认知：统计可解释 ≠ 经济可解释
 │   └─ 书：Cochrane《Asset Pricing》→ Ang《Asset Management》→ Ilmanen《Expected Returns》
 │       —— 用资产定价语言回答"这个因子为什么该赚"
 │
-├─ 阶段六：模型进阶（已进入）
-│   ├─ 随机森林 → LightGBM / LightGBM Ranker：对比而不是替换，同一套 walk-forward 比 OOS IC/ICIR/分层/成本后收益
+├─ 阶段七：模型进阶（已进入）
+│   ├─ 随机森林 → LightGBM / LambdaRank / rank_xendcg：对比而不是替换，同一套 walk-forward 比 OOS IC/ICIR/分层/成本后收益
 │   ├─ 已新增价格路径与残差路径因子（alpha_residual_momentum_21d 等）
 │   └─ 书：Tsay《Analysis of Financial Time Series》→ Campbell《Econometrics of Financial Markets》
 │       —— 金融数据不是普通 IID 表格：非平稳、异方差、厚尾
@@ -123,6 +131,7 @@ $f_k$ 是公共因子池，残差 $\varepsilon$ 才是别人拿不到、属于�
     ├─ 研究员线：ESL → Statistical Learning with Sparsity → High-Dim Statistics
     │   → Causal Inference → Market Microstructure（更会找因子 + 验证纪律）
     ├─ 组合线：Qian《Quantitative Equity Portfolio Management》→ Boyd《Convex Optimization》
+    ├─ 跨资产线：SPY/QQQ/IWM/sector ETF → ES/NQ/RTY 股指期货 → 宏观期货/FX
     ├─ 未来线：Probabilistic ML → Online Convex Optimization → RL → Stochastic Calculus
     └─ 明确不做：纯数学堆砌、深度学习优先、交易玄学书、重复搜广推入门
 ```
@@ -147,10 +156,11 @@ S&P 500 + LightGBM 排名学习：
 ```bash
 alpha-lab factors --config configs/universe_sp500.yaml
 alpha-lab ml-alpha --config configs/universe_sp500.yaml \
-  --model lightgbm_ranker \
-  --label-transform quantile \
-  --output-path data/processed/factors_sp500_lgbm_ranker.parquet
+  --model rank_xendcg \
+  --label-transform top_bottom \
+  --output-path data/processed/factors_sp500_rank_xendcg_top_bottom.parquet
 alpha-lab tune-lightgbm --config configs/universe_sp500.yaml \
+  --max-trials 48 \
   --output-path reports/lightgbm_tuning_sp500.csv
 ```
 

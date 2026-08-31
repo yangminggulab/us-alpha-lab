@@ -52,7 +52,30 @@ def add_cross_sectional_return_label(
             if values.notna().sum() >= 2
             else np.nan
         )
+    elif transform == "top_bottom":
+        data[label_column] = grouped.transform(
+            lambda values: _top_bottom_quantile_label(values, quantiles=quantiles)
+        )
     else:
-        raise ValueError("label transform must be one of: return, rank, zscore, quantile")
+        raise ValueError("label transform must be one of: return, rank, zscore, quantile, top_bottom")
 
     return data, label_column
+
+
+def _top_bottom_quantile_label(values: pd.Series, quantiles: int) -> pd.Series:
+    clean_count = values.notna().sum()
+    if clean_count < max(2, quantiles):
+        return pd.Series(np.nan, index=values.index)
+    buckets = pd.qcut(
+        values.rank(method="first"),
+        q=min(quantiles, clean_count),
+        labels=False,
+        duplicates="drop",
+    )
+    if buckets.isna().all():
+        return pd.Series(np.nan, index=values.index)
+    top_bucket = buckets.max()
+    labels = pd.Series(np.nan, index=values.index)
+    labels[buckets == 0] = 0
+    labels[buckets == top_bucket] = int(top_bucket)
+    return labels

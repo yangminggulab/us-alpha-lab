@@ -73,7 +73,7 @@ alpha-lab report / discover-factors / leaderboard / alpha-cluster
 | `data/raw/daily_bars_sp500.parquet` | 当前主 raw 数据 | 248,226 行，502 支，2024-08-28 至 2026-08-28 |
 | `data/processed/factors_sp500.parquet` | 当前主因子表 | 248,226 行，100 列，含新增路径/残差因子 |
 | `data/models/sp500_model.joblib` | 当前主模型文件 | 最近一次 SP500 模型训练产物 |
-| `reports/lightgbm_tuning_sp500.csv` | 当前调参结果 | LightGBM / Ranker 小网格搜索结果 |
+| `reports/lightgbm_tuning_sp500.csv` | 当前调参结果 | LightGBM / LambdaRank / rank_xendcg 保守网格搜索结果 |
 
 这四个是目前最容易继续往下推进的主线文件。
 
@@ -89,6 +89,7 @@ alpha-lab report / discover-factors / leaderboard / alpha-cluster
 | `data/processed/factors_sp500_lgbm.parquet` | 历史对照 | 新增路径因子之前生成，只有 76 列 |
 | `data/processed/factors_sp500_lgbm_zscore.parquet` | 实验对照 | LightGBM + zscore label |
 | `data/processed/factors_sp500_lgbm_ranker.parquet` | 实验对照 | LightGBM Ranker + quantile label |
+| `data/processed/factors_sp500_rank_xendcg_top_bottom.parquet` | 新实验候选 | rank_xendcg + top/bottom label，尚需重新生成 |
 
 注意：`factors_sp500_lgbm.parquet` 比当前 `factors_sp500.parquet` 少列，容易误用。继续研究时应优先从 `factors_sp500.parquet` 重新生成 ML 输出。
 

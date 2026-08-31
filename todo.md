@@ -13,10 +13,13 @@
 - [ ] 改 `min_samples_leaf` = 5 / 20 / 100，观察 MAE 变化，讲"叶子越少越容易过拟合"
 - [ ] 不看资料讲出：随机在哪（bootstrap + 特征子集）、Gini 公式、误差 = 偏差² + 方差
 
-### B. LightGBM（代码在 [modeling.py:48-76](src/us_alpha_lab/modeling.py:48)）
+### B. LightGBM（代码在 [modeling.py:48-190](src/us_alpha_lab/modeling.py:48)）
 
 - [ ] `learning_rate` 0.03 → 0.3，观察验证集先降后升，讲"和 `n_estimators` 此消彼长"
 - [ ] `num_leaves` 8 vs 512，观察过拟合，讲"leaf-wise 为什么容易过拟合"
+- [ ] 对比 `lightgbm + zscore`、`lightgbm_ranker + quantile`、`rank_xendcg + top_bottom`，记录 OOS IC / ICIR
+- [ ] 讲清 `bagging_freq=1` 为什么要和 `subsample` 一起开，否则行采样不会按预期生效
+- [ ] 讲清 `top_bottom` 标签为什么丢掉中间分位：中间股票未来收益噪声最大，先学头尾差异
 - [ ] 不看资料讲出：每轮拟合残差（负梯度）、level-wise vs leaf-wise、`reg_alpha`/`reg_lambda` 在罚什么
 
 ### C. XGBoost（扩展，目前项目未接入）
@@ -27,11 +30,133 @@
 
 ### D. 量化落地（教程没有、面试必问）
 
-- [ ] 讲清防前视：[modeling.py:108](src/us_alpha_lab/modeling.py:108) `shift(feature_lag)` 和 walk-forward `embargo`
+- [ ] 讲清防前视：[modeling.py](src/us_alpha_lab/modeling.py) `shift(feature_lag)` 和 walk-forward `embargo`
 - [ ] 讲清为什么树模型不需要 `StandardScaler`（对比 MLP 需要）
-- [ ] 讲清缺失值为什么用 median 不用 mean（[modeling.py:57](src/us_alpha_lab/modeling.py:57)）
+- [ ] 讲清缺失值为什么用 median 不用 mean（[modeling.py](src/us_alpha_lab/modeling.py)）
 
-## 二、PyTorch：从 0 到熟练掌握
+### E. 遗忘机制（市场非平稳）
+
+- [ ] 在 `ml-alpha` 和 `tune-lightgbm` 加 `--time-decay-half-life` 参数，支持 `none / 126 / 252 / 504`
+- [ ] 实现指数时间衰减样本权重：`weight = 0.5 ** (age_days / half_life)`，传给 LightGBM 的 `sample_weight`
+- [ ] 对比 `train_size` = 126 / 252 / 504，判断硬滚动窗口和软时间衰减谁更稳
+- [ ] 加简单 regime 特征：`market_return_21d`、`market_volatility_21d`，分别看高波/低波、上涨/下跌 regime 下 IC
+- [ ] 记录结论：旧样本是帮忙还是污染；如果 504 + decay 优于 252，说明老样本有用但需要降权
+- [ ] 不看资料讲出：市场非平稳、样本半衰期、硬遗忘 vs 软遗忘、regime 条件复用
+
+## 二、量化研究：价格行为与交易员行为因子
+
+目标：把“技术分析看到的图形”翻译成“交易员行为假设”，再写成可验证、可回测、可解释的因子。
+
+### A. 技术分析语言翻译
+
+- [ ] 把突破、支撑、阻力、放量、缩量、跳空、假突破分别写成一句交易员行为假设
+- [ ] 给每个形态标注可能的参与者：趋势资金、止损盘、价值资金、做市商、被动资金、散户追涨杀跌
+- [ ] 判断每个形态更可能预测收益方向、波动率、成交量，还是只预测风险
+- [ ] 不看资料讲出：画线本身不是 alpha，背后的订单、流动性和行为偏差才可能是 alpha
+
+### B. 可计算因子实现
+
+- [ ] 突破：实现 `alpha_breakout_60d`，例如 `close / rolling_high_60 - 1`
+- [ ] 支撑/超跌：实现 `alpha_distance_to_low_120d` 或 rolling low reversal
+- [ ] 假突破：实现突破后 1-3 日回落的 `breakout_failure` 候选
+- [ ] 缩量整理：组合 `range_compression`、`volatility_contraction`、`volume_contraction`
+- [ ] 放量确认：实现 `return_5d * volume_z_21d` 或 volume shock confirmation
+- [ ] 跳空压力：扩展 `alpha_gap_pressure_21d`，区分 gap continuation 和 intraday reversal
+
+### C. K 线数学结构
+
+- [ ] 单根 K 线几何：把 `(open, high, low, close)` 转成实体、上影线、下影线、振幅、收盘位置、实体占比、跳空
+- [ ] 形态区域化：用无量纲比例定义 doji、hammer、long upper shadow、engulfing 等，不用主观画图
+- [ ] 多根 K 线统计识别：读 Lo, Mamaysky, Wang《Foundations of Technical Analysis》，理解非参数形态识别和条件收益分布检验
+- [ ] 蜡烛图实证检验：读 Caginalp & Laurent《The predictive power of price patterns》，看 OHLC candlestick pattern 如何做样本外统计检验
+- [ ] 路径结构：学习 path signature / shapelets，把一段 K 线路径编码成顺序敏感的特征
+- [ ] 事件时间：学习 directional-change / intrinsic time，用价格移动事件替代固定时间 K 线
+- [ ] 实现候选因子：`alpha_candle_body_ratio`、`alpha_close_location_value`、`alpha_shadow_pressure`、`alpha_directional_change_count`
+- [ ] 不看资料讲出：K 线不是图片，而是 OHLC 约束四元组、路径片段和事件序列
+
+### D. 微观结构学习
+
+- [ ] 读 Hasbrouck《Empirical Market Microstructure》：bid-ask spread、order flow、price impact、liquidity、informed trading
+- [ ] 读 O'Hara《Market Microstructure Theory》：做市商库存、信息不对称、战略交易者、价格形成
+- [ ] 把书里的概念对应到日线可观测 proxy：价差不可见时用振幅、成交额、换手、跳空、日内位置做代理
+- [ ] 不看资料讲出：为什么同一个突破，在高流动性和低流动性股票里含义不同
+
+### E. 验证与 memo
+
+- [ ] 每个 price-action 因子跑样本外 IC / ICIR / positive IC rate
+- [ ] 跑分位收益和成本后 top-minus-bottom 回测
+- [ ] 做市场/行业/size/beta/momentum 中性化，判断是否只是旧因子的变体
+- [ ] 做 regime 分层：高波/低波、上涨/下跌、放量/缩量环境
+- [ ] 每个因子写一页 memo：表象、交易员行为、可计算定义、样本外结果、失效机制
+
+## 三、前沿论文转实验
+
+原则：论文只读和我们当前主线有关的部分。每篇至少落成一个实验、一个指标或一条研究纪律，否则先不深入。
+
+### A. Kronos：金融 K 线基础模型
+
+- [ ] 读 [Kronos: A Foundation Model for the Language of Financial Markets](https://neurips.cc/virtual/2025/130441)，重点看 K 线 tokenizer、预训练任务、RankIC 评估
+- [x] 把 OHLCV 路径改写成 token/离散状态：涨跌幅桶、振幅桶、成交量冲击桶、收盘位置桶
+- [x] 实现一组轻量版“序列 K 线因子”：最近 20/60 日 token n-gram 频率、路径相似度、状态转移概率
+- [ ] 和现有 `range_compression`、`gap_pressure`、`intraday_quality` 做正交化，判断是否有增量 IC
+- [ ] 记录结论：K 线基础模型的价值在我们这里是“路径表征”，不是直接相信模型输出
+
+### B. OFR Benchmark：金融预测公平比较
+
+- [ ] 读 [Do Deep Learning Methods Improve Financial Forecasts?](https://www.financialresearch.gov/the-ofr-blog/2026/08/25/deep-learning-methods-improve-financial-forecasts/)，重点看固定数据、固定切分、统一基准的比较方式
+- [ ] 给 `ml-alpha` 输出增加统一 benchmark 表：historical mean / Ridge / RF / LightGBM / ranker 的 OOS MAE、R²、IC、ICIR
+- [ ] 所有模型使用同一份 `train/valid/test` walk-forward 切分，避免“换模型也换数据”的假优势
+- [ ] 增加 naive baseline：预测 0、历史均值、行业/市场暴露基线，确认模型是否真的超过简单基准
+- [ ] 记录结论：深度学习只在有稳定重复结构时值得上；短期收益预测先尊重强基线
+
+### C. Practitioner Pipeline：横截面收益预测流程
+
+- [ ] 读 [Cross-Sectional Return Prediction Using Machine Learning: A Practitioner Pipeline](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=6675380)，重点看 Ridge/XGBoost/LightGBM、walk-forward、IC、成本后 Sharpe、Deflated Sharpe Ratio
+- [ ] 接入 `Ridge` / `ElasticNet` 作为强线性基线，和 RF / LightGBM / ranker 同表比较
+- [ ] 接入 XGBoost 后，用同一套 walk-forward 输出 RF / LGBM / XGB / Ridge 对比表
+- [ ] 在裁决表加入 Deflated Sharpe Ratio 或至少 Probabilistic Sharpe Ratio，减少短样本高 Sharpe 误判
+- [ ] 输出每次实验的“可复现卡片”：数据版本、universe、日期区间、模型参数、成本假设、是否中性化
+
+### D. LLM / Agent 论文：只服务研究流程
+
+- [ ] 读 [LLMs Get Lost In Multi-Turn Conversation](https://blog.iclr.cc/2026/04/23/announcing-the-iclr-2026-outstanding-papers/)，把启发落到研究记录：每轮实验必须有固定问题、固定配置、固定裁决标准
+- [ ] 读 [Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs Beyond the Base Model?](https://blog.neurips.cc/2025/11/26/announcing-the-neurips-2025-best-paper-awards/)，作为“不急着做 RL 交易”的反例提醒
+- [ ] 如果以后做自动挖因子 Agent，先让 Agent 生成候选定义和 memo，再由现有五关裁决自动否决或通过
+- [ ] 不做直接 RL 下单，除非已经有稳定 alpha、真实成本模型、组合约束和可验证 reward
+
+## 四、跨资产扩展：期货、股指期货与货币
+
+原则：先把股票日线多因子框架做硬，再扩资产；扩资产时先 ETF/股指代理，再股指期货，最后普通期货和 FX。
+
+### A. 暂缓引入的条件
+
+- [ ] SP500 主线完成：数据稳定、因子库、LightGBM/ranker、遗忘机制、价格行为因子、行业/市场中性、成本后回测
+- [ ] 至少写出 3 篇因子 memo：假设、数据、定义、样本外 IC、分位收益、成本后收益、失效机制
+- [ ] 明确当前股票项目的问题是“需要对冲/宏观 regime”，而不是“股票框架还没验证清楚”
+- [ ] 不看资料讲出：为什么期货/FX 会引入合约切换、展期、交易时间、保证金、报价 convention 等新复杂度
+
+### B. 第一步：ETF / 指数代理
+
+- [ ] 加入 SPY、QQQ、IWM 和 sector ETF，作为市场、风格、行业、risk-on/risk-off proxy
+- [ ] 做市场 beta hedge：用 SPY/QQQ 回归股票因子收益，观察残差 alpha
+- [ ] 加 regime 特征：指数 21/63 日收益、指数波动、市场宽度、sector dispersion
+- [ ] 对比裸股票多空 vs ETF hedge 后组合的收益、波动、回撤
+
+### C. 第二步：股指期货
+
+- [ ] 学 continuous futures construction：主力合约、换月、back-adjustment、roll return
+- [ ] 加 ES / NQ / RTY，先做股指 hedge 和 basis 研究，不急着做独立期货 alpha
+- [ ] 研究 basis / 贴水升水 / 到期日效应 / 套保盘压力
+- [ ] 回测加入保证金、乘数、交易时间、展期成本和滑点
+
+### D. 第三步：宏观期货与 FX
+
+- [ ] 商品/利率/外汇先从 trend、carry、value 三类经典因子开始
+- [ ] 学 cross-asset volatility targeting，把不同资产波动缩放到可比较尺度
+- [ ] 加 FX pairs 时先搞清楚报价方向、利差/carry、24 小时交易和宏观事件日
+- [ ] 形成第二条研究线：cross-asset trend/carry/value + risk parity / crisis alpha
+
+## 五、PyTorch：从 0 到熟练掌握
 
 路线：手写 MLP（地基）→ 训练循环（核心）→ 手搓 transformer（封顶）。
 
@@ -73,5 +198,8 @@
 
 ## 进度
 
-- 机器学习：RF 未开始 / LightGBM 未开始 / XGBoost 未接入
+- 机器学习：RF 未开始 / LightGBM 已接入 rank_xendcg/top_bottom，遗忘机制待实现 / XGBoost 未接入
+- 价格行为因子：已形成学习路线，待实现 breakout / support / failure / volume shock / K 线数学结构候选
+- 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR、正交化验证
+- 跨资产扩展：先不引入期货/FX；股票主线成熟后先 ETF/股指代理，再股指期货，最后宏观期货和货币
 - PyTorch：未开始

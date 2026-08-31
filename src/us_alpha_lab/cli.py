@@ -13,6 +13,8 @@ from us_alpha_lab.config import load_config
 from us_alpha_lab.experiment import ExperimentConfig, run_experiment
 from us_alpha_lab.factor_discovery import build_factor_discovery_report
 from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
+from us_alpha_lab.feature_engineering import add_cross_sectional_features
+from us_alpha_lab.kline_tokens import add_kline_sequence_factors, kline_factor_columns
 from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_results
 from us_alpha_lab.massive_data import fetch_daily_bars
 from us_alpha_lab.methodology import build_methodology_html
@@ -73,6 +75,30 @@ def factors(config: Path = typer.Option(Path("configs/universe.yaml"), help="Res
     typer.echo(f"Saved {len(frame):,} rows to {cfg.factors_path}")
 
 
+@app.command("kline-factors")
+def kline_factors(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    windows: str = typer.Option("20,60", help="Comma-separated rolling windows, e.g. 20,60."),
+    output_path: Path = typer.Option(
+        Path("data/processed/kline_sequence_factors.parquet"),
+        help="Output path for standalone K-line sequence factors.",
+    ),
+    include_cross_sectional: bool = typer.Option(
+        True,
+        help="Add same-day ranks and z-scores for K-line alpha columns.",
+    ),
+) -> None:
+    cfg = load_config(config)
+    parsed_windows = [int(value.strip()) for value in windows.split(",") if value.strip()]
+    bars = pd.read_parquet(cfg.raw_path)
+    frame = add_kline_sequence_factors(bars, windows=parsed_windows)
+    if include_cross_sectional:
+        frame = add_cross_sectional_features(frame, kline_factor_columns(parsed_windows))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(output_path, index=False)
+    typer.echo(f"Saved {len(frame):,} rows to {output_path}")
+
+
 @app.command("discover-factors")
 def discover_factors(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
@@ -97,11 +123,11 @@ def train(
     horizon: int = typer.Option(5, help="Forward return horizon in trading days."),
     model: str = typer.Option(
         "random_forest",
-        help="Model backend: random_forest, lightgbm, or lightgbm_ranker.",
+        help="Model backend: random_forest, lightgbm, lightgbm_ranker, or rank_xendcg.",
     ),
     label_transform: str = typer.Option(
         "return",
-        help="Training label transform: return, rank, zscore, or quantile.",
+        help="Training label transform: return, rank, zscore, quantile, or top_bottom.",
     ),
 ) -> None:
     cfg = load_config(config)
@@ -126,11 +152,11 @@ def ml_alpha(
     embargo: int = typer.Option(5, help="Embargo gap between train and test windows."),
     model: str = typer.Option(
         "random_forest",
-        help="Model backend: random_forest, lightgbm, or lightgbm_ranker.",
+        help="Model backend: random_forest, lightgbm, lightgbm_ranker, or rank_xendcg.",
     ),
     label_transform: str = typer.Option(
         "return",
-        help="Training label transform: return, rank, zscore, or quantile.",
+        help="Training label transform: return, rank, zscore, quantile, or top_bottom.",
     ),
     output_path: Path | None = typer.Option(None, help="Output factor table path."),
 ) -> None:
@@ -216,6 +242,14 @@ def html_report_cmd(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
     horizon: int = typer.Option(5, help="Forward return horizon in trading days."),
     top_n: int = typer.Option(5, help="Number of top factors to chart in the report."),
+    factor_top_n: int | None = typer.Option(
+        None,
+        help="Optional IC-ranked limit for backtests and expensive report sections.",
+    ),
+    verdict_top_n: int | None = typer.Option(
+        None,
+        help="Optional limit for the costly five-gate verdict table, ranked by IC.",
+    ),
     backtest_horizon: int = typer.Option(1, help="Forward return horizon for the quantile backtest."),
     output_path: Path = typer.Option(Path("research_report.html"), help="Output HTML report path."),
 ) -> None:
@@ -226,6 +260,8 @@ def html_report_cmd(
         output_path=output_path,
         horizon=horizon,
         top_n=top_n,
+        factor_top_n=factor_top_n,
+        verdict_top_n=verdict_top_n,
         backtest_horizon=backtest_horizon,
     )
     typer.echo(f"Saved HTML report to {path}")
