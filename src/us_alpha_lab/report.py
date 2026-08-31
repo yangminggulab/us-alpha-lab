@@ -8,9 +8,11 @@ from pathlib import Path
 import pandas as pd
 
 from us_alpha_lab import visualization
-from us_alpha_lab.analysis import factor_ic_report
+from us_alpha_lab.analysis import daily_factor_ic, factor_ic_report
+from us_alpha_lab.kline_tokens import kline_factor_columns
+from us_alpha_lab.labels import add_forward_return_label
 from us_alpha_lab.leaderboard import build_factor_leaderboard
-from us_alpha_lab.verdict import build_factor_verdict
+from us_alpha_lab.verdict import build_factor_verdict, orthogonalized_ic_series
 
 _IC_CN = {
     "factor": "因子",
@@ -21,6 +23,23 @@ _IC_CN = {
     "overall_spearman": "整体 Spearman",
     "days": "样本天数",
 }
+
+_KLINE_CN = {
+    "factor": "K 线因子",
+    "mean_ic": "平均 IC",
+    "ic_ir": "IC 信息比率",
+    "positive_ic_rate": "正向 IC 占比",
+    "ic_orth": "正交 IC",
+    "orth_ir": "正交 IR",
+    "days": "IC 天数",
+    "orth_days": "正交天数",
+}
+
+_KLINE_ORTHOGONAL_POOL = [
+    "alpha_range_compression_21d",
+    "alpha_gap_pressure_21d",
+    "alpha_intraday_quality_21d",
+]
 
 # 因子一句话解读。key 为因子名；value 用大白话说明"度量什么 + 为什么可能预测未来收益"。
 FACTOR_GLOSSARY: dict[str, str] = {
@@ -414,6 +433,101 @@ def _summary_html(ic_report: pd.DataFrame, leaderboard: pd.DataFrame) -> str:
     )
 
 
+def _factor_ic_stats(data: pd.DataFrame, factor: str, label: str) -> dict[str, float | int | str] | None:
+    daily_ic = daily_factor_ic(data, factor=factor, label=label).dropna()
+    if daily_ic.empty:
+        return None
+    ic_std = float(daily_ic.std())
+    return {
+        "factor": factor,
+        "mean_ic": float(daily_ic.mean()),
+        "ic_ir": float(daily_ic.mean() / ic_std) if ic_std else 0.0,
+        "positive_ic_rate": float((daily_ic > 0).mean()),
+        "days": len(daily_ic),
+    }
+
+
+def _kline_report_frame(
+    kline_factors: pd.DataFrame,
+    base_factors: pd.DataFrame,
+    horizon: int,
+) -> pd.DataFrame:
+    kline_columns = [column for column in kline_factor_columns() if column in kline_factors.columns]
+    if not kline_columns or "close" not in kline_factors.columns:
+        return pd.DataFrame()
+
+    data = add_forward_return_label(
+        kline_factors[["ticker", "date", "close", *kline_columns]].copy(),
+        horizon=horizon,
+    )
+    label = f"future_return_{horizon}d"
+
+    pool_columns = [column for column in _KLINE_ORTHOGONAL_POOL if column in base_factors.columns]
+    if pool_columns:
+        base_subset = base_factors[["ticker", "date", *pool_columns]].copy()
+        data = data.merge(base_subset, on=["ticker", "date"], how="left")
+
+    rows = []
+    for factor in kline_columns:
+        stats = _factor_ic_stats(data, factor=factor, label=label)
+        if stats is None:
+            continue
+        orth_series = (
+            orthogonalized_ic_series(data, factor, pool_columns, label).dropna()
+            if pool_columns
+            else pd.Series(dtype=float)
+        )
+        if orth_series.empty:
+            stats["ic_orth"] = math.nan
+            stats["orth_ir"] = math.nan
+            stats["orth_days"] = 0
+        else:
+            orth_std = float(orth_series.std())
+            stats["ic_orth"] = float(orth_series.mean())
+            stats["orth_ir"] = float(orth_series.mean() / orth_std) if orth_std else 0.0
+            stats["orth_days"] = len(orth_series)
+        rows.append(stats)
+
+    if not rows:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(rows)
+    sort_key = frame["ic_orth"].fillna(frame["mean_ic"])
+    return (
+        frame.assign(_sort_key=sort_key)
+        .sort_values("_sort_key", ascending=False)
+        .drop(columns="_sort_key")
+        .reset_index(drop=True)
+    )
+
+
+def _kline_section_html(
+    kline_factors: pd.DataFrame | None,
+    base_factors: pd.DataFrame,
+    horizon: int,
+) -> str:
+    if kline_factors is None or kline_factors.empty:
+        return ""
+
+    frame = _kline_report_frame(kline_factors, base_factors, horizon=horizon)
+    if frame.empty:
+        return ""
+
+    best = frame.iloc[0]
+    best_factor = str(best["factor"])
+    raw_ic = _fmt(float(best["mean_ic"]))
+    orth_ic = _fmt(float(best["ic_orth"])) if pd.notna(best["ic_orth"]) else "—"
+    table = _table_html(frame, _KLINE_CN)
+    return f"""
+<div class="section" id="kline">
+    <h2>K 线路径 token 实验</h2>
+    <p class="guide">这个模块把 OHLCV 序列离散成 K 线 token，再统计 20/60 日路径熵、放量上涨片段、反转转移率和路径相似度。正交 IC 是把 K 线因子对 range_compression、gap_pressure、intraday_quality 回归取残差后，再看残差对未来 {horizon} 日收益的 IC。</p>
+    <p class="guide">当前最靠前候选：{html_lib.escape(best_factor)}，原始 IC {raw_ic}，正交 IC {orth_ic}。它现在更适合作为“路径表征”候选加入组合验证，而不是直接当成最终交易信号。</p>
+    {table}
+</div>
+"""
+
+
 def _gate_cell(value: bool | None) -> str:
     if value is None:
         return '<span class="badge weak">—</span>'
@@ -526,6 +640,8 @@ def build_html_report(
     quantiles: int = 5,
     cost_bps: float = 5.0,
     methodology_link: str | None = "methodology.html",
+    kline_factors: pd.DataFrame | None = None,
+    kline_horizon: int | None = None,
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -585,6 +701,12 @@ def build_html_report(
     )
     verdict_html = _verdict_table_html(verdict_frame)
     verdict_summary_html = _verdict_summary(verdict_frame)
+    kline_section = _kline_section_html(
+        kline_factors,
+        factors,
+        horizon=kline_horizon or horizon,
+    )
+    kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
 
     method_entry = (
         f'<a class="link-method" href="{html_lib.escape(methodology_link)}">'
@@ -611,6 +733,7 @@ def build_html_report(
 <nav class="nav">
     <a href="#summary">执行摘要</a>
     <a href="#cards">候选因子</a>
+    {kline_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -635,6 +758,8 @@ def build_html_report(
     {factor_cards_html}
     </div>
 </div>
+
+{kline_section}
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>

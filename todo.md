@@ -98,8 +98,8 @@
 - [ ] 读 [Kronos: A Foundation Model for the Language of Financial Markets](https://neurips.cc/virtual/2025/130441)，重点看 K 线 tokenizer、预训练任务、RankIC 评估
 - [x] 把 OHLCV 路径改写成 token/离散状态：涨跌幅桶、振幅桶、成交量冲击桶、收盘位置桶
 - [x] 实现一组轻量版“序列 K 线因子”：最近 20/60 日 token n-gram 频率、路径相似度、状态转移概率
-- [ ] 和现有 `range_compression`、`gap_pressure`、`intraday_quality` 做正交化，判断是否有增量 IC
-- [ ] 记录结论：K 线基础模型的价值在我们这里是“路径表征”，不是直接相信模型输出
+- [x] 和现有 `range_compression`、`gap_pressure`、`intraday_quality` 做正交化，判断是否有增量 IC
+- [x] 记录结论：K 线基础模型的价值在我们这里是“路径表征”，不是直接相信模型输出
 
 ### B. OFR Benchmark：金融预测公平比较
 
@@ -200,6 +200,6 @@
 
 - 机器学习：RF 未开始 / LightGBM 已接入 rank_xendcg/top_bottom，遗忘机制待实现 / XGBoost 未接入
 - 价格行为因子：已形成学习路线，待实现 breakout / support / failure / volume shock / K 线数学结构候选
-- 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR、正交化验证
+- 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现并接入主报告的正交 IC 模块；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR
 - 跨资产扩展：先不引入期货/FX；股票主线成熟后先 ETF/股指代理，再股指期货，最后宏观期货和货币
 - PyTorch：未开始

@@ -252,9 +252,18 @@ def html_report_cmd(
     ),
     backtest_horizon: int = typer.Option(1, help="Forward return horizon for the quantile backtest."),
     output_path: Path = typer.Option(Path("research_report.html"), help="Output HTML report path."),
+    kline_factors_path: Path | None = typer.Option(
+        Path("data/processed/kline_sequence_factors.parquet"),
+        help="Optional standalone K-line factor parquet path; ignored when missing.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
+    kline_frame = (
+        pd.read_parquet(kline_factors_path)
+        if kline_factors_path is not None and kline_factors_path.exists()
+        else None
+    )
     path = build_html_report(
         factor_frame,
         output_path=output_path,
@@ -263,6 +272,7 @@ def html_report_cmd(
         factor_top_n=factor_top_n,
         verdict_top_n=verdict_top_n,
         backtest_horizon=backtest_horizon,
+        kline_factors=kline_frame,
     )
     typer.echo(f"Saved HTML report to {path}")
 

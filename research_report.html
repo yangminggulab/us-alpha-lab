@@ -210,6 +210,7 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
 <nav class="nav">
     <a href="#summary">执行摘要</a>
     <a href="#cards">候选因子</a>
+    <a href="#kline">K 线路径</a>
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -242,6 +243,110 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
 <div class="factor-card"><div class="rank">5</div><div class="name">alpha_intraday_quality_21d<span class="badge weak">弱信号</span></div><div class="desc">信号不明显；换手可控。看近 21 日日内上涨是否稳定，买盘越连续越像持续性资金行为。</div><div class="metrics">IC <b>0.0079</b>　IR <b>0.0470</b>　换手 <b>0.2908</b></div></div>
     </div>
 </div>
+
+
+<div class="section" id="kline">
+    <h2>K 线路径 token 实验</h2>
+    <p class="guide">这个模块把 OHLCV 序列离散成 K 线 token，再统计 20/60 日路径熵、放量上涨片段、反转转移率和路径相似度。正交 IC 是把 K 线因子对 range_compression、gap_pressure、intraday_quality 回归取残差后，再看残差对未来 5 日收益的 IC。</p>
+    <p class="guide">当前最靠前候选：alpha_kline_reversal_transition_60d，原始 IC 0.0298，正交 IC 0.0209。它现在更适合作为“路径表征”候选加入组合验证，而不是直接当成最终交易信号。</p>
+    <table class="dataframe dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>K 线因子</th>
+      <th>平均 IC</th>
+      <th>IC 信息比率</th>
+      <th>正向 IC 占比</th>
+      <th>IC 天数</th>
+      <th>正交 IC</th>
+      <th>正交 IR</th>
+      <th>正交天数</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>alpha_kline_reversal_transition_60d</td>
+      <td>0.0298</td>
+      <td>0.1787</td>
+      <td>0.5571</td>
+      <td>438</td>
+      <td>0.0209</td>
+      <td>0.1438</td>
+      <td>438</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_state_entropy_20d</td>
+      <td>0.0154</td>
+      <td>0.1884</td>
+      <td>0.5651</td>
+      <td>476</td>
+      <td>0.0130</td>
+      <td>0.1788</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_state_entropy_60d</td>
+      <td>0.0173</td>
+      <td>0.1277</td>
+      <td>0.5297</td>
+      <td>438</td>
+      <td>0.0116</td>
+      <td>0.0969</td>
+      <td>438</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_reversal_transition_20d</td>
+      <td>0.0070</td>
+      <td>0.0546</td>
+      <td>0.5000</td>
+      <td>478</td>
+      <td>0.0013</td>
+      <td>0.0119</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_path_similarity_20d</td>
+      <td>-0.0083</td>
+      <td>-0.1415</td>
+      <td>0.4475</td>
+      <td>476</td>
+      <td>-0.0032</td>
+      <td>-0.0529</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_path_similarity_60d</td>
+      <td>-0.0075</td>
+      <td>-0.1129</td>
+      <td>0.4772</td>
+      <td>438</td>
+      <td>-0.0048</td>
+      <td>-0.0825</td>
+      <td>438</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_bull_volume_ngram_60d</td>
+      <td>-0.0053</td>
+      <td>-0.0589</td>
+      <td>0.5205</td>
+      <td>438</td>
+      <td>-0.0050</td>
+      <td>-0.0631</td>
+      <td>438</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_bull_volume_ngram_20d</td>
+      <td>-0.0066</td>
+      <td>-0.0799</td>
+      <td>0.5283</td>
+      <td>477</td>
+      <td>-0.0091</td>
+      <td>-0.1363</td>
+      <td>476</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>
