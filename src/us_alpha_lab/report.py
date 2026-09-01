@@ -11,6 +11,7 @@ from us_alpha_lab import visualization
 from us_alpha_lab.analysis import daily_factor_ic, factor_ic_report
 from us_alpha_lab.kline_tokens import kline_factor_columns
 from us_alpha_lab.labels import add_forward_return_label
+from us_alpha_lab.latent_participant import LATENT_STATES, latent_factor_columns
 from us_alpha_lab.leaderboard import build_factor_leaderboard
 from us_alpha_lab.verdict import build_factor_verdict, orthogonalized_ic_series
 
@@ -48,6 +49,18 @@ _KLINE_DISCOVERY_CN = {
     "coverage": "覆盖率",
     "discovery_score": "发现分",
     "verdict": "判定",
+}
+
+_LATENT_CN = {
+    "factor": "状态因子",
+    "state_label": "隐藏状态",
+    "mean_ic": "平均 IC",
+    "ic_ir": "IC 信息比率",
+    "positive_ic_rate": "正向 IC 占比",
+    "ic_orth": "正交 IC",
+    "orth_ir": "正交 IR",
+    "days": "IC 天数",
+    "orth_days": "正交天数",
 }
 
 _KLINE_ORTHOGONAL_POOL = [
@@ -572,6 +585,86 @@ def _kline_discovery_section_html(
 """
 
 
+def _latent_report_frame(
+    latent_states: pd.DataFrame,
+    base_factors: pd.DataFrame,
+    horizon: int,
+) -> pd.DataFrame:
+    latent_columns = [column for column in latent_factor_columns() if column in latent_states.columns]
+    if not latent_columns or "close" not in latent_states.columns:
+        return pd.DataFrame()
+
+    data = add_forward_return_label(
+        latent_states[["ticker", "date", "close", *latent_columns]].copy(),
+        horizon=horizon,
+    )
+    label = f"future_return_{horizon}d"
+    pool_columns = [column for column in _KLINE_ORTHOGONAL_POOL if column in base_factors.columns]
+    if pool_columns:
+        data = data.merge(base_factors[["ticker", "date", *pool_columns]], on=["ticker", "date"], how="left")
+
+    labels = {f"alpha_latent_{state.name}_prob": state.label for state in LATENT_STATES}
+    rows = []
+    for factor in latent_columns:
+        stats = _factor_ic_stats(data, factor=factor, label=label)
+        if stats is None:
+            continue
+        orth_series = (
+            orthogonalized_ic_series(data, factor, pool_columns, label).dropna()
+            if pool_columns
+            else pd.Series(dtype=float)
+        )
+        stats["state_label"] = labels.get(factor, factor)
+        if orth_series.empty:
+            stats["ic_orth"] = math.nan
+            stats["orth_ir"] = math.nan
+            stats["orth_days"] = 0
+        else:
+            orth_std = float(orth_series.std())
+            stats["ic_orth"] = float(orth_series.mean())
+            stats["orth_ir"] = float(orth_series.mean() / orth_std) if orth_std else 0.0
+            stats["orth_days"] = len(orth_series)
+        rows.append(stats)
+
+    if not rows:
+        return pd.DataFrame()
+    frame = pd.DataFrame(rows)
+    return (
+        frame.assign(_sort_key=frame["ic_orth"].abs().fillna(frame["mean_ic"].abs()))
+        .sort_values("_sort_key", ascending=False)
+        .drop(columns="_sort_key")
+        .reset_index(drop=True)
+    )
+
+
+def _latent_section_html(
+    latent_states: pd.DataFrame | None,
+    base_factors: pd.DataFrame,
+    horizon: int,
+) -> str:
+    if latent_states is None or latent_states.empty:
+        return ""
+
+    frame = _latent_report_frame(latent_states, base_factors, horizon=horizon)
+    if frame.empty:
+        return ""
+
+    best = frame.iloc[0]
+    best_label = str(best["state_label"])
+    best_factor = str(best["factor"])
+    raw_ic = _fmt(float(best["mean_ic"]))
+    orth_ic = _fmt(float(best["ic_orth"])) if pd.notna(best["ic_orth"]) else "—"
+    table = _table_html(frame, _LATENT_CN)
+    return f"""
+<div class="section" id="latent-participants">
+    <h2>低频隐藏参与者状态实验</h2>
+    <p class="guide">这个模块用日线 OHLCV 构造成交量冲击、跳空、日内强弱、振幅、收盘位置和 5 日趋势，再用 HMM 风格递推估计不同参与者状态概率。它是独立研究层，不写入主因子池；状态标签只是行为假设，不代表真实身份。</p>
+    <p class="guide">当前正交后最突出的状态：{html_lib.escape(best_label)}（{html_lib.escape(best_factor)}），原始 IC {raw_ic}，正交 IC {orth_ic}。下一步要看它能否通过五关裁决和扣费组合回测。</p>
+    {table}
+</div>
+"""
+
+
 def _gate_cell(value: bool | None) -> str:
     if value is None:
         return '<span class="badge weak">—</span>'
@@ -688,6 +781,7 @@ def build_html_report(
     kline_horizon: int | None = None,
     kline_discovery: pd.DataFrame | None = None,
     kline_discovery_top_n: int = 12,
+    latent_states: pd.DataFrame | None = None,
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -756,10 +850,12 @@ def build_html_report(
         kline_discovery,
         top_n=kline_discovery_top_n,
     )
+    latent_section = _latent_section_html(latent_states, factors, horizon=horizon)
     kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
     kline_discovery_nav = (
         '<a href="#kline-discovery">路径发现</a>' if kline_discovery_section else ""
     )
+    latent_nav = '<a href="#latent-participants">隐藏参与者</a>' if latent_section else ""
 
     method_entry = (
         f'<a class="link-method" href="{html_lib.escape(methodology_link)}">'
@@ -788,6 +884,7 @@ def build_html_report(
     <a href="#cards">候选因子</a>
     {kline_nav}
     {kline_discovery_nav}
+    {latent_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -816,6 +913,8 @@ def build_html_report(
 {kline_section}
 
 {kline_discovery_section}
+
+{latent_section}
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>

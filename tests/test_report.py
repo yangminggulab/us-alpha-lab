@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from us_alpha_lab.kline_tokens import add_kline_sequence_factors
+from us_alpha_lab.latent_participant import add_latent_participant_states
 from us_alpha_lab.report import build_html_report
 from us_alpha_lab.visualization import _setup_chinese_font
 
@@ -134,6 +135,7 @@ def test_build_html_report_has_verdict_gate_table(tmp_path) -> None:
 def test_build_html_report_has_kline_section(tmp_path) -> None:
     factors = _synthetic_bars()
     kline_factors = add_kline_sequence_factors(factors)
+    latent_states = add_latent_participant_states(factors)
     kline_discovery = pd.DataFrame(
         [
             {
@@ -161,6 +163,7 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
         verdict_top_n=2,
         kline_factors=kline_factors,
         kline_discovery=kline_discovery,
+        latent_states=latent_states,
     )
 
     html = path.read_text(encoding="utf-8")
@@ -171,6 +174,9 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
     assert "K 线路径发现 Top 候选" in html
     assert "return_transition_down_to_up" in html
     assert "#kline-discovery" in html
+    assert "低频隐藏参与者状态实验" in html
+    assert "alpha_latent_" in html
+    assert "#latent-participants" in html
 
 
 def test_chinese_font_setup_does_not_raise() -> None:

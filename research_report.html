@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>量化因子研究报告 — 2026-08-31</title>
+<title>量化因子研究报告 — 2026-09-01</title>
 <style>
 :root {
     --accent: #1f4e79;
@@ -203,7 +203,7 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
 <body>
 <div class="header">
     <h1>量化因子研究报告</h1>
-    <p>生成日期：2026-08-31　·　前瞻收益窗口：5 个交易日　·　回测多空调仓窗口：1 个交易日</p>
+    <p>生成日期：2026-09-01　·　前瞻收益窗口：5 个交易日　·　回测多空调仓窗口：1 个交易日</p>
     <p class="note">仅供学习研究，不构成投资建议；历史表现不代表未来收益。</p>
 </div>
 
@@ -212,6 +212,7 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
     <a href="#cards">候选因子</a>
     <a href="#kline">K 线路径</a>
     <a href="#kline-discovery">路径发现</a>
+    <a href="#latent-participants">隐藏参与者</a>
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -539,6 +540,97 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
       <td>0.5889</td>
       <td>0.0496</td>
       <td>强增量候选</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+<div class="section" id="latent-participants">
+    <h2>低频隐藏参与者状态实验</h2>
+    <p class="guide">这个模块用日线 OHLCV 构造成交量冲击、跳空、日内强弱、振幅、收盘位置和 5 日趋势，再用 HMM 风格递推估计不同参与者状态概率。它是独立研究层，不写入主因子池；状态标签只是行为假设，不代表真实身份。</p>
+    <p class="guide">当前正交后最突出的状态：被迫卖出（alpha_latent_forced_selling_prob），原始 IC 0.0133，正交 IC 0.0125。下一步要看它能否通过五关裁决和扣费组合回测。</p>
+    <table class="dataframe dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>状态因子</th>
+      <th>平均 IC</th>
+      <th>IC 信息比率</th>
+      <th>正向 IC 占比</th>
+      <th>IC 天数</th>
+      <th>隐藏状态</th>
+      <th>正交 IC</th>
+      <th>正交 IR</th>
+      <th>正交天数</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>alpha_latent_forced_selling_prob</td>
+      <td>0.0133</td>
+      <td>0.0927</td>
+      <td>0.5191</td>
+      <td>497</td>
+      <td>被迫卖出</td>
+      <td>0.0125</td>
+      <td>0.1262</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_noise_prob</td>
+      <td>-0.0132</td>
+      <td>-0.1435</td>
+      <td>0.4427</td>
+      <td>497</td>
+      <td>噪声交易</td>
+      <td>-0.0122</td>
+      <td>-0.1642</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_market_making_pressure_prob</td>
+      <td>0.0150</td>
+      <td>0.1647</td>
+      <td>0.5493</td>
+      <td>497</td>
+      <td>做市库存压力</td>
+      <td>0.0117</td>
+      <td>0.1452</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_arbitrage_repair_prob</td>
+      <td>0.0086</td>
+      <td>0.0698</td>
+      <td>0.5412</td>
+      <td>497</td>
+      <td>套利修复</td>
+      <td>0.0108</td>
+      <td>0.1016</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_distribution_prob</td>
+      <td>0.0105</td>
+      <td>0.0818</td>
+      <td>0.5050</td>
+      <td>497</td>
+      <td>机构派发</td>
+      <td>0.0080</td>
+      <td>0.0832</td>
+      <td>476</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_accumulation_prob</td>
+      <td>-0.0014</td>
+      <td>-0.0100</td>
+      <td>0.5111</td>
+      <td>497</td>
+      <td>机构吸筹</td>
+      <td>-0.0052</td>
+      <td>-0.0477</td>
+      <td>476</td>
     </tr>
   </tbody>
 </table>

@@ -79,16 +79,25 @@
 - [ ] 读 Hasbrouck《Empirical Market Microstructure》：bid-ask spread、order flow、price impact、liquidity、informed trading
 - [ ] 读 O'Hara《Market Microstructure Theory》：做市商库存、信息不对称、战略交易者、价格形成
 - [ ] 读 Kyle model / Glosten-Milgrom model：理解知情交易者、做市商、order flow 和 adverse selection 如何共同决定价格
+- [ ] 读 [Probability of Informed Trading / PIN model](https://acaciafund.org/markets/research/easley-1996-probability-informed-trading-pin/)：理解如何从买卖单到达率估计信息交易概率
 - [ ] 把书里的概念对应到日线可观测 proxy：价差不可见时用振幅、成交额、换手、跳空、日内位置做代理
 - [ ] 不看资料讲出：为什么同一个突破，在高流动性和低流动性股票里含义不同
 
 ### E. 隐藏参与者与博弈结构（进阶）
 
+- [ ] 读 [Hidden Participation and the Timing of Price Discovery](https://www.mdpi.com/2227-7390/14/16/3019)：重点看隐藏参与者是否在场、Bayesian posterior、Kyle-type price discovery
+- [ ] 读 [A Hidden Markov Process Approach to Information-Based Trading](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2021557)：重点看用 HMM 从 order flow 推断信息状态和交易动机
+- [ ] 读 [DeepLOB: Deep Convolutional Neural Networks for Limit Order Books](https://arxiv.org/abs/1808.03668)：重点看盘口空间结构 + 时间依赖如何被 CNN/LSTM 编码
+- [ ] 读 [Deep limit order book forecasting: a microstructural guide](https://discovery.ucl.ac.uk/id/eprint/10218102/)：重点看为什么高预测准确率不等于可交易信号
+- [ ] 读 [ABIDES-MARL: Optimal Execution with Endogenous Liquidity](https://academ.us/article/2511.02016/)：重点看多智能体执行、内生流动性和战略互动
+- [ ] 读 [Multi-Agent Reinforcement Learning for Market Making](https://doi.org/10.1145/3768292.3770388)：重点看不同做市 agent 的竞争、适应和 interaction-level metrics
+- [ ] 读 [MAGAT: multi-agent game-theoretic adversarial trading](https://www.nature.com/articles/s41598-026-60518-6)：只作为仿真/鲁棒训练参考，不直接当作实盘证据
 - [ ] 把研究问题写成链路：可观测市场数据 → 推断隐藏参与者类型 → 推断目标/约束 → 预测下一步动作 → 预测价格冲击
 - [ ] 定义隐藏状态集合：`机构买入`、`机构卖出`、`做市库存调整`、`套利修复`、`被迫卖出`、`噪声交易`
 - [ ] 用日线 proxy 先做低频版 latent-state 特征：成交量冲击、连续小幅趋势、跳空延续、振幅扩张、收盘位置、反转失败
-- [ ] 实现 HMM / Bayesian filtering 原型：估计 `P(Z_t | X_1:t)`，输出每只股票每日最可能的参与者状态
-- [ ] 把参与者状态转成候选因子：机构吸筹概率、被迫卖出后反弹概率、做市库存压力、套利修复压力
+- [x] 实现 HMM / Bayesian filtering 原型：估计 `P(Z_t | X_1:t)`，输出每只股票每日最可能的参与者状态
+- [x] 把参与者状态转成候选因子：机构吸筹概率、被迫卖出后反弹概率、做市库存压力、套利修复压力
+- [ ] 把 Top latent participant 状态概率并入五关裁决和扣费组合回测，判断是否能从“行为状态 proxy”走到“可交易候选”
 - [ ] 做策略互动 memo：机构拆单 vs 做市商 adverse selection、止损盘 vs 反向流动性提供者、趋势资金 vs 套利资金
 - [ ] 记录边界：日线只能看到行为痕迹，不能证明真实身份；要用正交 IC、样本外和事件复盘约束解释
 - [ ] 不看资料讲出：这不是“看 K 线猜心理”，而是 observable data → latent agent inference → strategic action prediction
@@ -213,7 +222,7 @@
 ## 进度
 
 - 机器学习：RF 未开始 / LightGBM 已接入 rank_xendcg/top_bottom，遗忘机制待实现 / XGBoost 未接入
-- 价格行为因子：已形成学习路线，已加入隐藏参与者/博弈结构研究线；待实现 breakout / support / failure / volume shock / K 线数学结构候选
+- 价格行为因子：已形成学习路线，隐藏参与者低频 HMM 原型已实现；待实现 breakout / support / failure / volume shock / K 线数学结构候选
 - 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现，K 线 pattern 自动发现器已接入主报告；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR
 - 跨资产扩展：先不引入期货/FX；股票主线成熟后先 ETF/股指代理，再股指期货，最后宏观期货和货币
 - PyTorch：未开始

@@ -16,6 +16,10 @@ from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
 from us_alpha_lab.feature_engineering import add_cross_sectional_features
 from us_alpha_lab.kline_discovery import build_kline_pattern_discovery
 from us_alpha_lab.kline_tokens import add_kline_sequence_factors, kline_factor_columns
+from us_alpha_lab.latent_participant import (
+    add_latent_participant_states,
+    latent_factor_columns,
+)
 from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_results
 from us_alpha_lab.massive_data import fetch_daily_bars
 from us_alpha_lab.methodology import build_methodology_html
@@ -161,6 +165,36 @@ def discover_kline_patterns(
     typer.echo(report_frame.head(top_n).to_string(index=False, float_format=lambda value: f"{value:.4f}"))
 
 
+@app.command("latent-participants")
+def latent_participants(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    lookback: int = typer.Option(21, help="Rolling lookback for low-frequency observation z-scores."),
+    persistence: float = typer.Option(0.86, help="HMM-style state persistence in [0, 1)."),
+    emission_scale: float = typer.Option(1.25, help="Gaussian emission distance scale."),
+    output_path: Path = typer.Option(
+        Path("data/processed/latent_participant_states.parquet"),
+        help="Output path for standalone latent participant states.",
+    ),
+    include_cross_sectional: bool = typer.Option(
+        True,
+        help="Add same-day ranks and z-scores for latent participant alpha columns.",
+    ),
+) -> None:
+    cfg = load_config(config)
+    bars = pd.read_parquet(cfg.raw_path)
+    frame = add_latent_participant_states(
+        bars,
+        lookback=lookback,
+        persistence=persistence,
+        emission_scale=emission_scale,
+    )
+    if include_cross_sectional:
+        frame = add_cross_sectional_features(frame, latent_factor_columns())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(output_path, index=False)
+    typer.echo(f"Saved {len(frame):,} rows to {output_path}")
+
+
 @app.command()
 def train(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
@@ -304,6 +338,10 @@ def html_report_cmd(
         Path("reports/kline_discovery/kline_pattern_candidates.csv"),
         help="Optional K-line discovery CSV path; ignored when missing.",
     ),
+    latent_states_path: Path | None = typer.Option(
+        Path("data/processed/latent_participant_states.parquet"),
+        help="Optional latent participant state parquet path; ignored when missing.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
@@ -317,6 +355,11 @@ def html_report_cmd(
         if kline_discovery_path is not None and kline_discovery_path.exists()
         else None
     )
+    latent_states_frame = (
+        pd.read_parquet(latent_states_path)
+        if latent_states_path is not None and latent_states_path.exists()
+        else None
+    )
     path = build_html_report(
         factor_frame,
         output_path=output_path,
@@ -327,6 +370,7 @@ def html_report_cmd(
         backtest_horizon=backtest_horizon,
         kline_factors=kline_frame,
         kline_discovery=kline_discovery_frame,
+        latent_states=latent_states_frame,
     )
     typer.echo(f"Saved HTML report to {path}")
 

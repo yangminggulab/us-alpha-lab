@@ -46,7 +46,15 @@ def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
             "cmd": "alpha-lab discover-kline-patterns --config <config>",
         },
         {
-            "title": "⑤ 机器学习预测 ml-alpha（可选）",
+            "title": "⑤ 隐藏参与者状态 latent-participants（实验）",
+            "desc": "用日线 proxy 做低频版 HMM/Bayesian filtering，估计机构吸筹、派发、被迫卖出、做市压力、套利修复、噪声交易等状态概率。",
+            "algo": "成交量冲击 + 跳空 + 日内强弱 + 振幅 + 收盘位置 + 5 日趋势 → 状态原型 Gaussian emission → HMM 递推平滑 → alpha_latent_*_prob",
+            "inputs": raw_path,
+            "outputs": "data/processed/latent_participant_states.parquet",
+            "cmd": "alpha-lab latent-participants --config <config>",
+        },
+        {
+            "title": "⑥ 机器学习预测 ml-alpha（可选）",
             "desc": "用随机森林或 LightGBM 以全部因子预测未来收益，产物作为新因子进入因子池。",
             "algo": "Walk-forward ML 模型（random_forest / lightgbm / LambdaRank / rank_xendcg）→ SimpleImputer(median)；滚动 train/test + embargo 防前视偏差",
             "inputs": factors_path,
@@ -54,7 +62,7 @@ def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
             "cmd": "alpha-lab ml-alpha --config <config>",
         },
         {
-            "title": "⑥ 因子检验 IC 分析",
+            "title": "⑦ 因子检验 IC 分析",
             "desc": "对每个因子计算对未来收益的预测力指标，筛出候选。",
             "algo": "Spearman IC（截面单调相关）→ IC_IR（IC 均值/标准差）→ 分位数收益 → discovery_score 排序",
             "inputs": factors_path,
@@ -62,7 +70,7 @@ def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
             "cmd": "alpha-lab discover-factors --config <config>",
         },
         {
-            "title": "⑦ 组合回测 backtest",
+            "title": "⑧ 组合回测 backtest",
             "desc": "把因子分层做多空组合，验证预测力能否转化为真实收益。",
             "algo": "每日按因子分位数分层 → Top−Bottom 多空组合 → 换手成本扣减 → 基准对比（等权）→ 风险指标（回撤/夏普/IR）",
             "inputs": f"{factors_path} + IC 报告",
@@ -70,10 +78,10 @@ def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
             "cmd": "alpha-lab leaderboard --config <config>",
         },
         {
-            "title": "⑧ 结果汇总 html-report",
+            "title": "⑨ 结果汇总 html-report",
             "desc": "把结论、候选因子、图表、回测聚合到一份自包含 HTML。",
             "algo": "matplotlib 图表（中文注释，base64 内嵌）→ 单文件 HTML（结论优先）",
-            "inputs": "IC 报告 + leaderboard + K 线路径发现 + 图表",
+            "inputs": "IC 报告 + leaderboard + K 线路径发现 + 隐藏参与者状态 + 图表",
             "outputs": "research_report.html",
             "cmd": "alpha-lab html-report --config <config>",
         },
