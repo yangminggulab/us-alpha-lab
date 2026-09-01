@@ -147,6 +147,8 @@ cp .env.example .env          # 填入 MASSIVE_API_KEY
 
 alpha-lab fetch --tickers AAPL,MSFT,NVDA --start 2024-08-15 --end 2026-08-14
 alpha-lab factors
+alpha-lab kline-factors
+alpha-lab discover-kline-patterns
 alpha-lab ml-alpha --config configs/universe_free_50.yaml
 alpha-lab html-report
 ```

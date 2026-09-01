@@ -14,6 +14,7 @@ from us_alpha_lab.experiment import ExperimentConfig, run_experiment
 from us_alpha_lab.factor_discovery import build_factor_discovery_report
 from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
 from us_alpha_lab.feature_engineering import add_cross_sectional_features
+from us_alpha_lab.kline_discovery import build_kline_pattern_discovery
 from us_alpha_lab.kline_tokens import add_kline_sequence_factors, kline_factor_columns
 from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_results
 from us_alpha_lab.massive_data import fetch_daily_bars
@@ -115,6 +116,49 @@ def discover_factors(
     report_frame.to_csv(output_path, index=False)
     typer.echo(f"Saved factor discovery report to {output_path}")
     typer.echo(report_frame.head(12).to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+
+
+@app.command("discover-kline-patterns")
+def discover_kline_patterns(
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    horizon: int = typer.Option(5, help="Forward return horizon for IC analysis."),
+    windows: str = typer.Option("20,60", help="Comma-separated rolling windows, e.g. 20,60."),
+    kline_factors_path: Path | None = typer.Option(
+        Path("data/processed/kline_sequence_factors.parquet"),
+        help="Optional K-line factor parquet path; falls back to raw bars when missing.",
+    ),
+    output_path: Path = typer.Option(
+        Path("reports/kline_discovery/kline_pattern_candidates.csv"),
+        help="Output path for K-line pattern discovery candidates.",
+    ),
+    max_token_patterns: int = typer.Option(
+        24,
+        help="Number of observed full K-line tokens to include as candidate events.",
+    ),
+    min_coverage: float = typer.Option(0.2, help="Minimum non-null candidate coverage."),
+    top_n: int = typer.Option(20, help="Number of top candidates to print."),
+) -> None:
+    cfg = load_config(config)
+    parsed_windows = [int(value.strip()) for value in windows.split(",") if value.strip()]
+    source_path = (
+        kline_factors_path
+        if kline_factors_path is not None and kline_factors_path.exists()
+        else cfg.raw_path
+    )
+    source = pd.read_parquet(source_path)
+    base_factors = pd.read_parquet(cfg.factors_path)
+    report_frame = build_kline_pattern_discovery(
+        source,
+        base_factors,
+        horizon=horizon,
+        windows=parsed_windows,
+        max_token_patterns=max_token_patterns,
+        min_coverage=min_coverage,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    report_frame.to_csv(output_path, index=False)
+    typer.echo(f"Saved K-line pattern discovery report to {output_path}")
+    typer.echo(report_frame.head(top_n).to_string(index=False, float_format=lambda value: f"{value:.4f}"))
 
 
 @app.command()
@@ -256,12 +300,21 @@ def html_report_cmd(
         Path("data/processed/kline_sequence_factors.parquet"),
         help="Optional standalone K-line factor parquet path; ignored when missing.",
     ),
+    kline_discovery_path: Path | None = typer.Option(
+        Path("reports/kline_discovery/kline_pattern_candidates.csv"),
+        help="Optional K-line discovery CSV path; ignored when missing.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
     kline_frame = (
         pd.read_parquet(kline_factors_path)
         if kline_factors_path is not None and kline_factors_path.exists()
+        else None
+    )
+    kline_discovery_frame = (
+        pd.read_csv(kline_discovery_path)
+        if kline_discovery_path is not None and kline_discovery_path.exists()
         else None
     )
     path = build_html_report(
@@ -273,6 +326,7 @@ def html_report_cmd(
         verdict_top_n=verdict_top_n,
         backtest_horizon=backtest_horizon,
         kline_factors=kline_frame,
+        kline_discovery=kline_discovery_frame,
     )
     typer.echo(f"Saved HTML report to {path}")
 

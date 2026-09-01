@@ -134,6 +134,24 @@ def test_build_html_report_has_verdict_gate_table(tmp_path) -> None:
 def test_build_html_report_has_kline_section(tmp_path) -> None:
     factors = _synthetic_bars()
     kline_factors = add_kline_sequence_factors(factors)
+    kline_discovery = pd.DataFrame(
+        [
+            {
+                "factor": "alpha_kline_pattern_return_transition_down_to_up_20d",
+                "family": "return_transition",
+                "window": 20,
+                "pattern": "return_transition_down_to_up",
+                "mean_ic": 0.02,
+                "ic_ir": 0.30,
+                "ic_orth": 0.015,
+                "orth_ir": 0.25,
+                "directional_ic_rate": 0.56,
+                "coverage": 0.80,
+                "discovery_score": 0.06,
+                "verdict": "增量候选",
+            }
+        ]
+    )
     path = build_html_report(
         factors,
         output_path=tmp_path / "research_report.html",
@@ -142,6 +160,7 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
         factor_top_n=2,
         verdict_top_n=2,
         kline_factors=kline_factors,
+        kline_discovery=kline_discovery,
     )
 
     html = path.read_text(encoding="utf-8")
@@ -149,6 +168,9 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
     assert "alpha_kline" in html
     assert "正交 IC" in html
     assert "#kline" in html
+    assert "K 线路径发现 Top 候选" in html
+    assert "return_transition_down_to_up" in html
+    assert "#kline-discovery" in html
 
 
 def test_chinese_font_setup_does_not_raise() -> None:

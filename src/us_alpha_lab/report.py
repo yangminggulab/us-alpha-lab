@@ -35,6 +35,21 @@ _KLINE_CN = {
     "orth_days": "正交天数",
 }
 
+_KLINE_DISCOVERY_CN = {
+    "factor": "候选因子",
+    "family": "类型",
+    "window": "窗口",
+    "pattern": "路径模式",
+    "mean_ic": "平均 IC",
+    "ic_ir": "IC 信息比率",
+    "ic_orth": "正交 IC",
+    "orth_ir": "正交 IR",
+    "directional_ic_rate": "方向一致率",
+    "coverage": "覆盖率",
+    "discovery_score": "发现分",
+    "verdict": "判定",
+}
+
 _KLINE_ORTHOGONAL_POOL = [
     "alpha_range_compression_21d",
     "alpha_gap_pressure_21d",
@@ -528,6 +543,35 @@ def _kline_section_html(
 """
 
 
+def _kline_discovery_section_html(
+    kline_discovery: pd.DataFrame | None,
+    top_n: int = 12,
+) -> str:
+    if kline_discovery is None or kline_discovery.empty:
+        return ""
+
+    frame = kline_discovery.copy()
+    if "discovery_score" in frame.columns:
+        frame = frame.sort_values("discovery_score", ascending=False)
+    frame = frame.head(top_n)
+    if frame.empty:
+        return ""
+
+    best = frame.iloc[0]
+    best_factor = str(best.get("factor", ""))
+    verdict = str(best.get("verdict", "观察"))
+    orth_ic = _fmt(float(best["ic_orth"])) if "ic_orth" in best and pd.notna(best["ic_orth"]) else "—"
+    table = _table_html(frame, _KLINE_DISCOVERY_CN)
+    return f"""
+<div class="section" id="kline-discovery">
+    <h2>K 线路径发现 Top 候选</h2>
+    <p class="guide">这个模块自动枚举 K 线 token 的状态、转移和组合模式，把每个模式变成滚动频率因子，再用正交 IC 排序。它的目的不是证明某个模式一定能交易，而是批量筛出“公共因子解释不了”的路径候选。</p>
+    <p class="guide">当前发现分最高：{html_lib.escape(best_factor)}，判定为 {html_lib.escape(verdict)}，正交 IC {orth_ic}。后续应只把强增量候选拿去做五关裁决、分层收益和扣费回测。</p>
+    {table}
+</div>
+"""
+
+
 def _gate_cell(value: bool | None) -> str:
     if value is None:
         return '<span class="badge weak">—</span>'
@@ -642,6 +686,8 @@ def build_html_report(
     methodology_link: str | None = "methodology.html",
     kline_factors: pd.DataFrame | None = None,
     kline_horizon: int | None = None,
+    kline_discovery: pd.DataFrame | None = None,
+    kline_discovery_top_n: int = 12,
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -706,7 +752,14 @@ def build_html_report(
         factors,
         horizon=kline_horizon or horizon,
     )
+    kline_discovery_section = _kline_discovery_section_html(
+        kline_discovery,
+        top_n=kline_discovery_top_n,
+    )
     kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
+    kline_discovery_nav = (
+        '<a href="#kline-discovery">路径发现</a>' if kline_discovery_section else ""
+    )
 
     method_entry = (
         f'<a class="link-method" href="{html_lib.escape(methodology_link)}">'
@@ -734,6 +787,7 @@ def build_html_report(
     <a href="#summary">执行摘要</a>
     <a href="#cards">候选因子</a>
     {kline_nav}
+    {kline_discovery_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -760,6 +814,8 @@ def build_html_report(
 </div>
 
 {kline_section}
+
+{kline_discovery_section}
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>

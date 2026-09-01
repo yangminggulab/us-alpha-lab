@@ -211,6 +211,7 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
     <a href="#summary">执行摘要</a>
     <a href="#cards">候选因子</a>
     <a href="#kline">K 线路径</a>
+    <a href="#kline-discovery">路径发现</a>
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -342,6 +343,202 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
       <td>-0.0091</td>
       <td>-0.1363</td>
       <td>476</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+
+<div class="section" id="kline-discovery">
+    <h2>K 线路径发现 Top 候选</h2>
+    <p class="guide">这个模块自动枚举 K 线 token 的状态、转移和组合模式，把每个模式变成滚动频率因子，再用正交 IC 排序。它的目的不是证明某个模式一定能交易，而是批量筛出“公共因子解释不了”的路径候选。</p>
+    <p class="guide">当前发现分最高：alpha_kline_pattern_return_down_60d，判定为 强增量候选，正交 IC -0.0296。后续应只把强增量候选拿去做五关裁决、分层收益和扣费回测。</p>
+    <table class="dataframe dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>候选因子</th>
+      <th>类型</th>
+      <th>窗口</th>
+      <th>路径模式</th>
+      <th>覆盖率</th>
+      <th>平均 IC</th>
+      <th>IC 信息比率</th>
+      <th>正交 IC</th>
+      <th>正交 IR</th>
+      <th>方向一致率</th>
+      <th>发现分</th>
+      <th>判定</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>alpha_kline_pattern_return_down_60d</td>
+      <td>single_state</td>
+      <td>60</td>
+      <td>return_down</td>
+      <td>0.9394</td>
+      <td>-0.0348</td>
+      <td>-0.2757</td>
+      <td>-0.0296</td>
+      <td>-0.2646</td>
+      <td>0.6381</td>
+      <td>0.0585</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_strong_up_60d</td>
+      <td>single_state</td>
+      <td>60</td>
+      <td>return_strong_up</td>
+      <td>0.9394</td>
+      <td>0.0409</td>
+      <td>0.1815</td>
+      <td>0.0331</td>
+      <td>0.1666</td>
+      <td>0.5717</td>
+      <td>0.0553</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_volume_strong_up_normal_60d</td>
+      <td>return_volume</td>
+      <td>60</td>
+      <td>return_volume_strong_up_normal</td>
+      <td>0.9011</td>
+      <td>0.0388</td>
+      <td>0.1808</td>
+      <td>0.0313</td>
+      <td>0.1674</td>
+      <td>0.5714</td>
+      <td>0.0529</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_range_close_location_normal_near_low_60d</td>
+      <td>range_close_location</td>
+      <td>60</td>
+      <td>range_close_location_normal_near_low</td>
+      <td>0.9394</td>
+      <td>-0.0394</td>
+      <td>-0.1906</td>
+      <td>-0.0300</td>
+      <td>-0.1666</td>
+      <td>0.5867</td>
+      <td>0.0526</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_close_location_down_near_low_60d</td>
+      <td>return_close_location</td>
+      <td>60</td>
+      <td>return_close_location_down_near_low</td>
+      <td>0.9394</td>
+      <td>-0.0362</td>
+      <td>-0.2101</td>
+      <td>-0.0284</td>
+      <td>-0.1881</td>
+      <td>0.6017</td>
+      <td>0.0519</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_transition_strong_up_to_strong_down_60d</td>
+      <td>return_transition</td>
+      <td>60</td>
+      <td>return_transition_strong_up_to_strong_down</td>
+      <td>0.9374</td>
+      <td>0.0415</td>
+      <td>0.2295</td>
+      <td>0.0273</td>
+      <td>0.1881</td>
+      <td>0.5837</td>
+      <td>0.0513</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_strong_up_20d</td>
+      <td>single_state</td>
+      <td>20</td>
+      <td>return_strong_up</td>
+      <td>0.9798</td>
+      <td>0.0320</td>
+      <td>0.1620</td>
+      <td>0.0295</td>
+      <td>0.1707</td>
+      <td>0.5873</td>
+      <td>0.0504</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_strong_down_20d</td>
+      <td>single_state</td>
+      <td>20</td>
+      <td>return_strong_down</td>
+      <td>0.9798</td>
+      <td>0.0379</td>
+      <td>0.1892</td>
+      <td>0.0286</td>
+      <td>0.1705</td>
+      <td>0.5708</td>
+      <td>0.0502</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_range_normal_20d</td>
+      <td>single_state</td>
+      <td>20</td>
+      <td>range_normal</td>
+      <td>0.9798</td>
+      <td>-0.0414</td>
+      <td>-0.1852</td>
+      <td>-0.0283</td>
+      <td>-0.1472</td>
+      <td>0.5811</td>
+      <td>0.0501</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_return_transition_strong_down_to_strong_up_60d</td>
+      <td>return_transition</td>
+      <td>60</td>
+      <td>return_transition_strong_down_to_strong_up</td>
+      <td>0.9374</td>
+      <td>0.0375</td>
+      <td>0.1898</td>
+      <td>0.0278</td>
+      <td>0.1780</td>
+      <td>0.5794</td>
+      <td>0.0500</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_range_normal_60d</td>
+      <td>single_state</td>
+      <td>60</td>
+      <td>range_normal</td>
+      <td>0.9394</td>
+      <td>-0.0399</td>
+      <td>-0.1698</td>
+      <td>-0.0299</td>
+      <td>-0.1451</td>
+      <td>0.5567</td>
+      <td>0.0500</td>
+      <td>强增量候选</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_pattern_range_close_location_shock_middle_60d</td>
+      <td>range_close_location</td>
+      <td>60</td>
+      <td>range_close_location_shock_middle</td>
+      <td>0.9394</td>
+      <td>0.0413</td>
+      <td>0.2006</td>
+      <td>0.0266</td>
+      <td>0.1640</td>
+      <td>0.5889</td>
+      <td>0.0496</td>
+      <td>强增量候选</td>
     </tr>
   </tbody>
 </table>
