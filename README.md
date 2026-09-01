@@ -150,6 +150,7 @@ alpha-lab factors
 alpha-lab kline-factors
 alpha-lab discover-kline-patterns
 alpha-lab latent-participants
+alpha-lab validate-experiment data/processed/latent_participant_states.parquet
 alpha-lab ml-alpha --config configs/universe_free_50.yaml
 alpha-lab html-report
 ```

@@ -11,6 +11,11 @@ from us_alpha_lab.analysis import factor_ic_report
 from us_alpha_lab.backtest import BacktestConfig, run_quantile_backtest
 from us_alpha_lab.config import load_config
 from us_alpha_lab.experiment import ExperimentConfig, run_experiment
+from us_alpha_lab.experiment_validation import (
+    ExperimentValidationConfig,
+    build_experiment_validation_report,
+    infer_experiment_factor_columns,
+)
 from us_alpha_lab.factor_discovery import build_factor_discovery_report
 from us_alpha_lab.factors import add_alpha_factors, add_cross_sectional_ranks
 from us_alpha_lab.feature_engineering import add_cross_sectional_features
@@ -48,6 +53,13 @@ def _parse_tickers(tickers: str | None, fallback: list[str]) -> list[str]:
     if not tickers:
         return fallback
     return [ticker.strip().upper() for ticker in tickers.split(",") if ticker.strip()]
+
+
+def _parse_csv_option(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or None
 
 
 @app.command()
@@ -163,6 +175,66 @@ def discover_kline_patterns(
     report_frame.to_csv(output_path, index=False)
     typer.echo(f"Saved K-line pattern discovery report to {output_path}")
     typer.echo(report_frame.head(top_n).to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+
+
+@app.command("validate-experiment")
+def validate_experiment(
+    experiment_path: Path = typer.Argument(..., help="Experiment parquet/CSV with ticker/date + alpha columns."),
+    config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
+    horizon: int = typer.Option(5, help="Forward return horizon for IC analysis."),
+    backtest_horizon: int = typer.Option(1, help="Forward return horizon for quantile backtest."),
+    factor_columns: str | None = typer.Option(
+        None,
+        help="Comma-separated experiment factor columns. Defaults to inferred alpha_* columns.",
+    ),
+    factor_prefixes: str = typer.Option(
+        "alpha_,ml_prediction",
+        help="Comma-separated prefixes used when inferring factor columns.",
+    ),
+    orthogonal_pool: str | None = typer.Option(
+        None,
+        help="Comma-separated public factor pool. Defaults to enabled non-ML main factors.",
+    ),
+    output_path: Path = typer.Option(
+        Path("reports/experiment_validation/latest_validation.csv"),
+        help="Output validation CSV path.",
+    ),
+    min_coverage: float = typer.Option(0.2, help="Minimum non-null factor coverage."),
+    quantiles: int = typer.Option(5, help="Number of daily factor buckets."),
+    cost_bps: float = typer.Option(5.0, help="Turnover cost in basis points."),
+    top_n: int = typer.Option(20, help="Number of top rows to print."),
+) -> None:
+    cfg = load_config(config)
+    experiment = (
+        pd.read_csv(experiment_path)
+        if experiment_path.suffix.lower() == ".csv"
+        else pd.read_parquet(experiment_path)
+    )
+    base_factors = pd.read_parquet(cfg.factors_path)
+    prefixes = tuple(_parse_csv_option(factor_prefixes) or ["alpha_", "ml_prediction"])
+    parsed_factor_columns = _parse_csv_option(factor_columns)
+    inferred = parsed_factor_columns or infer_experiment_factor_columns(experiment, prefixes=prefixes)
+    report_frame = build_experiment_validation_report(
+        experiment,
+        base_factors,
+        factor_columns=inferred,
+        orthogonal_pool=_parse_csv_option(orthogonal_pool),
+        config=ExperimentValidationConfig(
+            horizon=horizon,
+            backtest_horizon=backtest_horizon,
+            quantiles=quantiles,
+            cost_bps=cost_bps,
+            min_coverage=min_coverage,
+            factor_prefixes=prefixes,
+        ),
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    report_frame.to_csv(output_path, index=False)
+    typer.echo(f"Saved experiment validation report to {output_path}")
+    if report_frame.empty:
+        typer.echo("No valid experiment factors were found.")
+    else:
+        typer.echo(report_frame.head(top_n).to_string(index=False, float_format=lambda value: f"{value:.4f}"))
 
 
 @app.command("latent-participants")
@@ -342,6 +414,11 @@ def html_report_cmd(
         Path("data/processed/latent_participant_states.parquet"),
         help="Optional latent participant state parquet path; ignored when missing.",
     ),
+    experiment_validation_paths: str | None = typer.Option(
+        "reports/experiment_validation/kline_sequence_validation.csv,"
+        "reports/experiment_validation/latent_participant_validation.csv",
+        help="Comma-separated experiment validation CSV paths; missing files are ignored.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
@@ -360,6 +437,11 @@ def html_report_cmd(
         if latent_states_path is not None and latent_states_path.exists()
         else None
     )
+    experiment_validations = {}
+    for value in _parse_csv_option(experiment_validation_paths) or []:
+        validation_path = Path(value)
+        if validation_path.exists():
+            experiment_validations[validation_path.stem] = pd.read_csv(validation_path)
     path = build_html_report(
         factor_frame,
         output_path=output_path,
@@ -371,6 +453,7 @@ def html_report_cmd(
         kline_factors=kline_frame,
         kline_discovery=kline_discovery_frame,
         latent_states=latent_states_frame,
+        experiment_validations=experiment_validations,
     )
     typer.echo(f"Saved HTML report to {path}")
 

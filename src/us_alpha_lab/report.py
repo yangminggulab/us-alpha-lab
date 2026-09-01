@@ -63,6 +63,22 @@ _LATENT_CN = {
     "orth_days": "正交天数",
 }
 
+_EXPERIMENT_VALIDATION_CN = {
+    "factor": "实验因子",
+    "mean_ic": "平均 IC",
+    "ic_ir": "IC 信息比率",
+    "ic_t": "IC t值",
+    "ic_orth": "正交 IC",
+    "ic_orth_ir": "正交 IR",
+    "net_sharpe": "扣费夏普",
+    "max_drawdown": "最大回撤",
+    "average_turnover": "平均换手",
+    "passed": "通过数",
+    "evaluated": "评估数",
+    "verdict": "判定",
+    "validation_score": "检验分",
+}
+
 _KLINE_ORTHOGONAL_POOL = [
     "alpha_range_compression_21d",
     "alpha_gap_pressure_21d",
@@ -665,6 +681,44 @@ def _latent_section_html(
 """
 
 
+def _experiment_validation_section_html(
+    experiment_validations: dict[str, pd.DataFrame] | None,
+    top_n: int = 8,
+) -> str:
+    if not experiment_validations:
+        return ""
+
+    blocks = []
+    for name, frame in experiment_validations.items():
+        if frame.empty:
+            continue
+        view = frame.copy()
+        if "validation_score" in view.columns:
+            view = view.sort_values("validation_score", ascending=False)
+        table = _table_html(view.head(top_n), _EXPERIMENT_VALIDATION_CN)
+        best = view.iloc[0]
+        best_factor = str(best.get("factor", ""))
+        verdict = str(best.get("verdict", ""))
+        orth_ic = _fmt(float(best["ic_orth"])) if "ic_orth" in best and pd.notna(best["ic_orth"]) else "—"
+        blocks.append(
+            "<details open>"
+            f"<summary>{html_lib.escape(name)}：{html_lib.escape(best_factor)}"
+            f"　·　正交 IC {orth_ic}　·　{html_lib.escape(verdict)}</summary>"
+            f"{table}"
+            "</details>"
+        )
+
+    if not blocks:
+        return ""
+    return f"""
+<div class="section" id="experiment-validation">
+    <h2>统一实验检验</h2>
+    <p class="guide">所有独立实验统一走同一套检验：覆盖率、IC、Newey-West t、分位单调性、对主因子池正交 IC、扣费多空回测、分年稳定性和五关判定。这里用于防止不同实验各自采用不同标准。</p>
+    {''.join(blocks)}
+</div>
+"""
+
+
 def _gate_cell(value: bool | None) -> str:
     if value is None:
         return '<span class="badge weak">—</span>'
@@ -782,6 +836,7 @@ def build_html_report(
     kline_discovery: pd.DataFrame | None = None,
     kline_discovery_top_n: int = 12,
     latent_states: pd.DataFrame | None = None,
+    experiment_validations: dict[str, pd.DataFrame] | None = None,
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -851,11 +906,15 @@ def build_html_report(
         top_n=kline_discovery_top_n,
     )
     latent_section = _latent_section_html(latent_states, factors, horizon=horizon)
+    experiment_validation_section = _experiment_validation_section_html(experiment_validations)
     kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
     kline_discovery_nav = (
         '<a href="#kline-discovery">路径发现</a>' if kline_discovery_section else ""
     )
     latent_nav = '<a href="#latent-participants">隐藏参与者</a>' if latent_section else ""
+    experiment_validation_nav = (
+        '<a href="#experiment-validation">实验检验</a>' if experiment_validation_section else ""
+    )
 
     method_entry = (
         f'<a class="link-method" href="{html_lib.escape(methodology_link)}">'
@@ -885,6 +944,7 @@ def build_html_report(
     {kline_nav}
     {kline_discovery_nav}
     {latent_nav}
+    {experiment_validation_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -915,6 +975,8 @@ def build_html_report(
 {kline_discovery_section}
 
 {latent_section}
+
+{experiment_validation_section}
 
 <div class="section" id="verdict">
     <h2>可盈利判定（五关裁决表）</h2>

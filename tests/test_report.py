@@ -154,6 +154,25 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
             }
         ]
     )
+    experiment_validation = pd.DataFrame(
+        [
+            {
+                "factor": "alpha_latent_forced_selling_prob",
+                "mean_ic": 0.013,
+                "ic_ir": 0.09,
+                "ic_t": 0.84,
+                "ic_orth": 0.011,
+                "ic_orth_ir": 0.12,
+                "net_sharpe": 0.67,
+                "max_drawdown": -0.16,
+                "average_turnover": 0.72,
+                "passed": 1,
+                "evaluated": 5,
+                "verdict": "未达标",
+                "validation_score": 0.03,
+            }
+        ]
+    )
     path = build_html_report(
         factors,
         output_path=tmp_path / "research_report.html",
@@ -164,6 +183,7 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
         kline_factors=kline_factors,
         kline_discovery=kline_discovery,
         latent_states=latent_states,
+        experiment_validations={"latent_participant_validation": experiment_validation},
     )
 
     html = path.read_text(encoding="utf-8")
@@ -177,6 +197,8 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
     assert "低频隐藏参与者状态实验" in html
     assert "alpha_latent_" in html
     assert "#latent-participants" in html
+    assert "统一实验检验" in html
+    assert "#experiment-validation" in html
 
 
 def test_chinese_font_setup_does_not_raise() -> None:

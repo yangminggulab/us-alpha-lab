@@ -213,6 +213,7 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
     <a href="#kline">K 线路径</a>
     <a href="#kline-discovery">路径发现</a>
     <a href="#latent-participants">隐藏参与者</a>
+    <a href="#experiment-validation">实验检验</a>
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
     <a href="#charts">因子图表</a>
@@ -634,6 +635,264 @@ table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12
     </tr>
   </tbody>
 </table>
+</div>
+
+
+
+<div class="section" id="experiment-validation">
+    <h2>统一实验检验</h2>
+    <p class="guide">所有独立实验统一走同一套检验：覆盖率、IC、Newey-West t、分位单调性、对主因子池正交 IC、扣费多空回测、分年稳定性和五关判定。这里用于防止不同实验各自采用不同标准。</p>
+    <details open><summary>kline_sequence_validation：alpha_kline_reversal_transition_60d　·　正交 IC 0.0083　·　未达标</summary><table class="dataframe dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>实验因子</th>
+      <th>平均 IC</th>
+      <th>IC 信息比率</th>
+      <th>IC t值</th>
+      <th>正交 IC</th>
+      <th>正交 IR</th>
+      <th>扣费夏普</th>
+      <th>最大回撤</th>
+      <th>平均换手</th>
+      <th>通过数</th>
+      <th>评估数</th>
+      <th>判定</th>
+      <th>检验分</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>alpha_kline_reversal_transition_60d</td>
+      <td>0.0298</td>
+      <td>0.1787</td>
+      <td>1.5320</td>
+      <td>0.0083</td>
+      <td>0.1214</td>
+      <td>0.7741</td>
+      <td>-0.1506</td>
+      <td>0.1533</td>
+      <td>2</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0336</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_reversal_transition_20d</td>
+      <td>0.0070</td>
+      <td>0.0546</td>
+      <td>0.4909</td>
+      <td>-0.0036</td>
+      <td>-0.0630</td>
+      <td>0.1799</td>
+      <td>-0.1484</td>
+      <td>0.2627</td>
+      <td>2</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0254</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_state_entropy_20d</td>
+      <td>0.0154</td>
+      <td>0.1884</td>
+      <td>1.6825</td>
+      <td>0.0078</td>
+      <td>0.1432</td>
+      <td>-0.5749</td>
+      <td>-0.2201</td>
+      <td>0.3271</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0233</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_bull_volume_ngram_60d</td>
+      <td>-0.0053</td>
+      <td>-0.0589</td>
+      <td>-0.5056</td>
+      <td>-0.0109</td>
+      <td>-0.2394</td>
+      <td>-0.2671</td>
+      <td>-0.1592</td>
+      <td>0.1067</td>
+      <td>0</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0223</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_bull_volume_ngram_20d</td>
+      <td>-0.0066</td>
+      <td>-0.0799</td>
+      <td>-0.7155</td>
+      <td>-0.0111</td>
+      <td>-0.2186</td>
+      <td>-0.6216</td>
+      <td>-0.1757</td>
+      <td>0.1644</td>
+      <td>0</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0212</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_state_entropy_60d</td>
+      <td>0.0173</td>
+      <td>0.1277</td>
+      <td>1.0997</td>
+      <td>0.0069</td>
+      <td>0.0917</td>
+      <td>-0.2818</td>
+      <td>-0.1943</td>
+      <td>0.1687</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0207</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_path_similarity_60d</td>
+      <td>-0.0075</td>
+      <td>-0.1129</td>
+      <td>-0.9670</td>
+      <td>-0.0032</td>
+      <td>-0.0759</td>
+      <td>-1.7910</td>
+      <td>-0.3441</td>
+      <td>0.8336</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0129</td>
+    </tr>
+    <tr>
+      <td>alpha_kline_path_similarity_20d</td>
+      <td>-0.0083</td>
+      <td>-0.1415</td>
+      <td>-1.2639</td>
+      <td>-0.0024</td>
+      <td>-0.0552</td>
+      <td>-1.7308</td>
+      <td>-0.3302</td>
+      <td>0.7420</td>
+      <td>0</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0015</td>
+    </tr>
+  </tbody>
+</table></details><details open><summary>latent_participant_validation：alpha_latent_arbitrage_repair_prob　·　正交 IC 0.0141　·　未达标</summary><table class="dataframe dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>实验因子</th>
+      <th>平均 IC</th>
+      <th>IC 信息比率</th>
+      <th>IC t值</th>
+      <th>正交 IC</th>
+      <th>正交 IR</th>
+      <th>扣费夏普</th>
+      <th>最大回撤</th>
+      <th>平均换手</th>
+      <th>通过数</th>
+      <th>评估数</th>
+      <th>判定</th>
+      <th>检验分</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>alpha_latent_arbitrage_repair_prob</td>
+      <td>0.0086</td>
+      <td>0.0698</td>
+      <td>0.6378</td>
+      <td>0.0141</td>
+      <td>0.2321</td>
+      <td>-0.4887</td>
+      <td>-0.2555</td>
+      <td>0.7004</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0322</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_market_making_pressure_prob</td>
+      <td>0.0150</td>
+      <td>0.1647</td>
+      <td>1.5115</td>
+      <td>0.0067</td>
+      <td>0.1167</td>
+      <td>1.0405</td>
+      <td>-0.1461</td>
+      <td>0.5787</td>
+      <td>2</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0296</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_noise_prob</td>
+      <td>-0.0132</td>
+      <td>-0.1435</td>
+      <td>-1.3157</td>
+      <td>-0.0053</td>
+      <td>-0.0966</td>
+      <td>-1.8471</td>
+      <td>-0.4622</td>
+      <td>0.5538</td>
+      <td>2</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0274</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_forced_selling_prob</td>
+      <td>0.0133</td>
+      <td>0.0927</td>
+      <td>0.8459</td>
+      <td>-0.0014</td>
+      <td>-0.0215</td>
+      <td>0.6715</td>
+      <td>-0.1663</td>
+      <td>0.7237</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0089</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_distribution_prob</td>
+      <td>0.0105</td>
+      <td>0.0818</td>
+      <td>0.7470</td>
+      <td>-0.0005</td>
+      <td>-0.0074</td>
+      <td>0.5579</td>
+      <td>-0.2009</td>
+      <td>0.6735</td>
+      <td>1</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0075</td>
+    </tr>
+    <tr>
+      <td>alpha_latent_accumulation_prob</td>
+      <td>-0.0014</td>
+      <td>-0.0100</td>
+      <td>-0.0914</td>
+      <td>-0.0017</td>
+      <td>-0.0290</td>
+      <td>-1.0303</td>
+      <td>-0.3667</td>
+      <td>0.6293</td>
+      <td>0</td>
+      <td>5</td>
+      <td>未达标</td>
+      <td>0.0000</td>
+    </tr>
+  </tbody>
+</table></details>
 </div>
 
 

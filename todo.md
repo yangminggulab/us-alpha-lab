@@ -97,7 +97,7 @@
 - [ ] 用日线 proxy 先做低频版 latent-state 特征：成交量冲击、连续小幅趋势、跳空延续、振幅扩张、收盘位置、反转失败
 - [x] 实现 HMM / Bayesian filtering 原型：估计 `P(Z_t | X_1:t)`，输出每只股票每日最可能的参与者状态
 - [x] 把参与者状态转成候选因子：机构吸筹概率、被迫卖出后反弹概率、做市库存压力、套利修复压力
-- [ ] 把 Top latent participant 状态概率并入五关裁决和扣费组合回测，判断是否能从“行为状态 proxy”走到“可交易候选”
+- [x] 把 Top latent participant 状态概率接入 `validate-experiment`：当前 best 为 `alpha_latent_arbitrage_repair_prob`，正交 IC 0.0141，但五关未达标
 - [ ] 做策略互动 memo：机构拆单 vs 做市商 adverse selection、止损盘 vs 反向流动性提供者、趋势资金 vs 套利资金
 - [ ] 记录边界：日线只能看到行为痕迹，不能证明真实身份；要用正交 IC、样本外和事件复盘约束解释
 - [ ] 不看资料讲出：这不是“看 K 线猜心理”，而是 observable data → latent agent inference → strategic action prediction
@@ -122,6 +122,7 @@
 - [x] 和现有 `range_compression`、`gap_pressure`、`intraday_quality` 做正交化，判断是否有增量 IC
 - [x] 记录结论：K 线基础模型的价值在我们这里是“路径表征”，不是直接相信模型输出
 - [x] 升级为 K 线 token 自动发现器：批量枚举状态、转移、组合 token，输出正交 IC Top 候选
+- [x] 抽出统一实验检验模块：任意实验 `alpha_*` 输出都可接入 IC、正交 IC、五关裁决和扣费回测
 - [ ] 把 Top K 线 pattern 候选并入五关裁决和扣费组合回测，判断是否能从“增量信息”走到“可交易候选”
 
 ### B. OFR Benchmark：金融预测公平比较
@@ -223,6 +224,6 @@
 
 - 机器学习：RF 未开始 / LightGBM 已接入 rank_xendcg/top_bottom，遗忘机制待实现 / XGBoost 未接入
 - 价格行为因子：已形成学习路线，隐藏参与者低频 HMM 原型已实现；待实现 breakout / support / failure / volume shock / K 线数学结构候选
-- 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现，K 线 pattern 自动发现器已接入主报告；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR
+- 前沿论文转实验：Kronos 轻量 K 线路径 token 因子 MVP 已实现，K 线 pattern 自动发现器已接入主报告，统一实验检验模块已抽出；待读 Kronos / OFR benchmark / practitioner pipeline；待实现 Ridge 基线、DSR/PSR
 - 跨资产扩展：先不引入期货/FX；股票主线成熟后先 ETF/股指代理，再股指期货，最后宏观期货和货币
 - PyTorch：未开始
