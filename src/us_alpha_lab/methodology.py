@@ -139,12 +139,12 @@ def _l2_l3_pipeline_steps() -> list[dict[str, str]]:
             "cmd": "alpha-lab a-share-l3-static-clusters --dates <YYYYMMDD,...> --wind-codes <000725.SZ,...>",
         },
         {
-            "title": "M6 状态序列 HMM（下一步）",
+            "title": "M6 HMM 状态序列 a-share-l3-hmm-states",
             "desc": "在静态行为簇的基础上加入时间转移约束，识别订单生命周期阶段和势力切换。",
-            "algo": "分钟特征或静态簇标签 → HMM/状态转移矩阵 → regime duration、transition surprise、session-level 标签",
+            "algo": "分钟特征 → KMeans 初始化 → diagonal Gaussian HMM EM → BIC 定 K → Viterbi 状态序列与转移矩阵",
             "inputs": "M3/M5 产物",
-            "outputs": "待定：l2_l3_hmm_states.parquet + 状态解释报告",
-            "cmd": "计划中",
+            "outputs": "reports/l2_l3/hmm_states_sample/labels.parquet + diagnostics/profile/transitions.csv",
+            "cmd": "alpha-lab a-share-l3-hmm-states --dates <YYYYMMDD,...> --wind-codes <000725.SZ,...>",
         },
     ]
 
@@ -167,7 +167,7 @@ def _step_card(step: dict[str, str]) -> str:
         '<div class="step">'
         f"<h3>{_escape(step['title'])}</h3>"
         f"<p class='desc'>{_escape(step['desc'])}</p>"
-        f"<table class='kv'>{rows}</table>"
+        f"<div class='table-wrap'><table class='kv'>{rows}</table></div>"
         "</div>"
     )
 
@@ -192,7 +192,8 @@ def _factor_table() -> str:
             f"<td class='desc'>{_escape(spec.description)}</td>"
             "</tr>"
         )
-    return f"<table class='dataframe'>{header}<tbody>{''.join(body_rows)}</tbody></table>"
+    table = f"<table class='dataframe'>{header}<tbody>{''.join(body_rows)}</tbody></table>"
+    return f"<div class='table-wrap'>{table}</div>"
 
 
 def _ticker_summary(tickers: list[str], preview: int = 10) -> str:
@@ -221,8 +222,8 @@ def _l2_l3_status_cards() -> str:
         ("研究域", "A 股深市逐笔委托 + 逐笔成交/撤单"),
         ("回连键", "orders.ex_order_id"),
         ("撤单来源", "trades.trade_code = C"),
-        ("当前阶段", "生命周期、分钟特征、质量门、静态聚类已接入"),
-        ("下一步", "HMM 状态序列"),
+        ("当前阶段", "生命周期、分钟特征、质量门、静态聚类、HMM 已接入"),
+        ("下一步", "扩样本稳定性 + 收益验证"),
     ]
     return "\n".join(
         f'<div class="card"><div class="label">{label}</div>'
@@ -249,6 +250,7 @@ body {
     margin: 0;
     padding: 24px;
     line-height: 1.6;
+    overflow-x: hidden;
 }
 .header {
     background: linear-gradient(135deg, var(--accent), var(--accent-soft));
@@ -263,20 +265,30 @@ body {
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .card { background: var(--card); border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .card .label { font-size: 12px; color: var(--muted); }
-.card .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+.card .value { font-size: 20px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
 .section { background: var(--card); border-radius: 10px; padding: 22px 26px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .section h2 { margin: 0 0 14px; font-size: 18px; color: var(--accent); border-bottom: 2px solid var(--line); padding-bottom: 10px; }
+.section, .step { overflow: hidden; }
 .step { border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin-bottom: 12px; background: #fcfdfe; }
 .step h3 { margin: 0 0 6px; font-size: 15px; color: #111827; }
 .step .desc { margin: 0 0 8px; font-size: 13px; color: #4b5563; }
 table.kv { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.kv td { padding: 4px 8px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
 table.kv td.k { width: 60px; color: var(--muted); white-space: nowrap; }
+table.kv td:not(.k) { overflow-wrap: anywhere; word-break: break-word; }
 table.dataframe { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.dataframe th { background: #f0f4f8; text-align: left; padding: 8px 10px; border-bottom: 2px solid #d1d9e0; }
 table.dataframe td { padding: 6px 10px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
 table.dataframe tr:nth-child(even) td { background: #fafbfc; }
 td.formula { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: #0f4c81; }
+.table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 8px 0 14px;
+    -webkit-overflow-scrolling: touch;
+}
 .footer { color: var(--muted); font-size: 12px; text-align: center; padding: 16px; }
 .link-back {
     display: inline-block;
@@ -287,6 +299,11 @@ td.formula { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 
     font-weight: 500;
 }
 .link-back:hover { text-decoration: underline; }
+@media (max-width: 820px) {
+    body { padding: 12px; }
+    .header, .section { padding: 18px 16px; border-radius: 8px; }
+    .cards { grid-template-columns: 1fr; }
+}
 """
 
 
@@ -294,6 +311,7 @@ def build_methodology_html(
     cfg: ResearchConfig,
     output_path: str | Path = "methodology.html",
     report_link: str | None = "research_report.html",
+    l2_l3_report_link: str | None = "l2_l3_report.html",
 ) -> Path:
     """Build a dynamic methodology/pipeline HTML from the current code state."""
     generated_on = datetime.now(timezone.utc).date().isoformat()
@@ -317,6 +335,12 @@ def build_methodology_html(
         if report_link
         else ""
     )
+    l2_l3_link = (
+        f'<a class="link-back" href="{html_lib.escape(l2_l3_report_link)}">'
+        "查看 A 股 L2/L3 专题报告 →</a>"
+        if l2_l3_report_link
+        else ""
+    )
 
     page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -334,6 +358,7 @@ def build_methodology_html(
 </div>
 
 {back_link}
+{l2_l3_link}
 
 <div class="cards">
 {_config_cards(cfg)}

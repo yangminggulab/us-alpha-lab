@@ -6,6 +6,7 @@ import pandas as pd
 import typer
 
 from us_alpha_lab.a_share_l3 import (
+    add_minute_forward_returns,
     available_l2_l3_days,
     build_l3_coverage_report,
     build_minute_features,
@@ -14,7 +15,9 @@ from us_alpha_lab.a_share_l3 import (
     cluster_share_report,
     lifecycle_quality_report,
     read_stock_day,
+    run_hmm_force_regimes,
     run_static_force_clustering,
+    state_signal_screen,
 )
 from us_alpha_lab.alpha_cluster import diagnostics_to_frame, run_alpha_cluster, save_cluster_outputs
 from us_alpha_lab.alpha_registry import alpha_registry_frame
@@ -40,7 +43,7 @@ from us_alpha_lab.leaderboard import build_factor_leaderboard, save_backtest_res
 from us_alpha_lab.massive_data import fetch_daily_bars
 from us_alpha_lab.methodology import build_methodology_html
 from us_alpha_lab.modeling import generate_ml_predictions, train_model, tune_lightgbm
-from us_alpha_lab.report import build_html_report
+from us_alpha_lab.report import build_html_report, build_l2_l3_html_report
 from us_alpha_lab.visualization import (
     create_factor_charts,
     plot_backtest_drawdown,
@@ -469,6 +472,120 @@ def a_share_l3_static_clusters(
     typer.echo(result.profile.head(12).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
 
 
+@app.command("a-share-l3-hmm-states")
+def a_share_l3_hmm_states(
+    dates: str = typer.Option(..., help="Comma-separated trading days, e.g. 20170123,20170124."),
+    wind_codes: str = typer.Option(..., help="Comma-separated SZ Wind codes, e.g. 000725.SZ,000001.SZ."),
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    output_dir: Path = typer.Option(
+        Path("reports/l2_l3/hmm_states"),
+        help="Directory for HMM labels, diagnostics, profile, and transition outputs.",
+    ),
+    k_values: str = typer.Option("2,3,4,5,6", help="Comma-separated candidate HMM state counts."),
+    sessions: str = typer.Option(
+        "continuous",
+        help="Comma-separated sessions to include, or 'all'.",
+    ),
+    feature_columns: str | None = typer.Option(
+        None,
+        help="Optional comma-separated minute feature columns. Defaults to the L3 HMM feature set.",
+    ),
+    clip_quantile: float = typer.Option(0.01, help="Two-sided winsorization quantile."),
+    max_iter: int = typer.Option(50, help="Maximum EM iterations per K."),
+    tol: float = typer.Option(1e-4, help="EM log-likelihood convergence tolerance."),
+    random_state: int = typer.Option(0, help="KMeans initialization random seed."),
+) -> None:
+    parsed_dates = _parse_csv_option(dates) or []
+    parsed_wind_codes = _parse_csv_option(wind_codes) or []
+    minute_frames = []
+    for date in parsed_dates:
+        for wind_code in parsed_wind_codes:
+            typer.echo(f"Building minute features for {date} {wind_code}...")
+            stock_day = read_stock_day(raw_dir, date, wind_code, include_quotes=True)
+            lifecycle = build_order_lifecycle(stock_day.orders, stock_day.trades)
+            minute_frames.append(
+                build_minute_features(
+                    lifecycle,
+                    stock_day.trades,
+                    quotes=stock_day.quotes,
+                )
+            )
+    minute_features = pd.concat(minute_frames, ignore_index=True) if minute_frames else pd.DataFrame()
+    parsed_k_values = [int(value) for value in (_parse_csv_option(k_values) or [])]
+    parsed_sessions = None if sessions.strip().lower() == "all" else _parse_csv_option(sessions)
+    result = run_hmm_force_regimes(
+        minute_features,
+        feature_columns=_parse_csv_option(feature_columns),
+        k_values=parsed_k_values,
+        sessions=parsed_sessions,
+        clip_quantile=clip_quantile,
+        max_iter=max_iter,
+        tol=tol,
+        random_state=random_state,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    labels_path = output_dir / "labels.parquet"
+    diagnostics_path = output_dir / "diagnostics.csv"
+    profile_path = output_dir / "profile.csv"
+    transitions_path = output_dir / "transitions.csv"
+    result.labels.to_parquet(labels_path, index=False)
+    result.diagnostics.to_csv(diagnostics_path, index=False)
+    result.profile.to_csv(profile_path, index=False)
+    result.transitions.to_csv(transitions_path, index=False)
+    typer.echo(f"Selected HMM K={result.selected_k} using features: {', '.join(result.feature_columns)}")
+    typer.echo(f"Saved labels to {labels_path}")
+    typer.echo(f"Saved diagnostics to {diagnostics_path}")
+    typer.echo(f"Saved profile to {profile_path}")
+    typer.echo(f"Saved transitions to {transitions_path}")
+    typer.echo(result.diagnostics.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+    typer.echo(result.profile.head(12).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
+@app.command("a-share-l3-hmm-signal-screen")
+def a_share_l3_hmm_signal_screen(
+    labels_path: Path = typer.Option(
+        Path("reports/l2_l3/hmm_states_sample/labels.parquet"),
+        help="Label parquet from a-share-l3-hmm-states (must carry quote_last_price_scaled).",
+    ),
+    state_col: str = typer.Option("hmm_state", help="Column holding the regime label."),
+    horizons: str = typer.Option("1,3,5", help="Comma-separated forward return horizons in minutes."),
+    output_dir: Path = typer.Option(
+        Path("reports/l2_l3/hmm_state_screen"),
+        help="Directory for the forward labels and screen tables.",
+    ),
+) -> None:
+    labels = pd.read_parquet(labels_path)
+    parsed_horizons = _parse_csv_option(horizons)
+    if not parsed_horizons:
+        raise typer.BadParameter("horizons must be a non-empty comma-separated list")
+    horizon_values = [int(value) for value in parsed_horizons]
+    labels = add_minute_forward_returns(labels, horizons=horizon_values)
+    result = state_signal_screen(labels, state_col=state_col, horizons=horizon_values)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    labels_path_out = output_dir / "forward_labels.parquet"
+    labels.to_parquet(labels_path_out, index=False)
+    result.summary.to_csv(output_dir / "screen_by_state.csv", index=False)
+    result.cell_level.to_csv(output_dir / "cell_level.csv", index=False)
+    result.spread.to_csv(output_dir / "spread.csv", index=False)
+    typer.echo(f"Saved forward labels to {labels_path_out}")
+    typer.echo(f"Saved summary / cell_level / spread CSVs to {output_dir}")
+    typer.echo("")
+    typer.echo("=== 状态条件前向收益 (pooled, 描述性) ===")
+    typer.echo(result.summary.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    typer.echo("")
+    typer.echo("=== 状态顶底 spread (bps) ===")
+    typer.echo(result.spread.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    typer.echo(
+        "\nCaveat: HMM labels are fit on the full day (Viterbi decoding sees the future), so this "
+        "screen is descriptive feasibility, NOT an estimate of a tradable edge. Evidence rests on "
+        "only 6 stock-day cells; overlap/serial correlation inflates the pooled t-stats."
+    )
+
+
 @app.command()
 def train(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
@@ -625,6 +742,10 @@ def html_report_cmd(
         Path("reports/l2_l3"),
         help="Optional A-share L2/L3 report directory; ignored when disabled.",
     ),
+    l2_l3_report_link: str | None = typer.Option(
+        "l2_l3_report.html",
+        help="Link to the standalone A-share L2/L3 report (None to disable).",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
@@ -661,8 +782,34 @@ def html_report_cmd(
         latent_states=latent_states_frame,
         experiment_validations=experiment_validations,
         l2_l3_report_dir=l2_l3_report_dir,
+        l2_l3_report_link=l2_l3_report_link,
     )
     typer.echo(f"Saved HTML report to {path}")
+
+
+@app.command("l2-l3-report")
+def l2_l3_report_cmd(
+    report_dir: Path = typer.Option(
+        Path("reports/l2_l3"),
+        help="A-share L2/L3 report directory.",
+    ),
+    output_path: Path = typer.Option(Path("l2_l3_report.html"), help="Output L2/L3 HTML path."),
+    main_report_link: str | None = typer.Option(
+        "research_report.html",
+        help="Link back to the main research report (None to disable).",
+    ),
+    methodology_link: str | None = typer.Option(
+        "methodology.html",
+        help="Link to methodology HTML (None to disable).",
+    ),
+) -> None:
+    path = build_l2_l3_html_report(
+        report_dir=report_dir,
+        output_path=output_path,
+        main_report_link=main_report_link,
+        methodology_link=methodology_link,
+    )
+    typer.echo(f"Saved L2/L3 HTML report to {path}")
 
 
 @app.command()
@@ -670,9 +817,18 @@ def methodology(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
     output_path: Path = typer.Option(Path("methodology.html"), help="Output methodology HTML path."),
     report_link: str | None = typer.Option("research_report.html", help="Link back to research report (None to disable)."),
+    l2_l3_report_link: str | None = typer.Option(
+        "l2_l3_report.html",
+        help="Link to the standalone A-share L2/L3 report (None to disable).",
+    ),
 ) -> None:
     cfg = load_config(config)
-    path = build_methodology_html(cfg, output_path=output_path, report_link=report_link)
+    path = build_methodology_html(
+        cfg,
+        output_path=output_path,
+        report_link=report_link,
+        l2_l3_report_link=l2_l3_report_link,
+    )
     typer.echo(f"Saved methodology HTML to {path}")
 
 

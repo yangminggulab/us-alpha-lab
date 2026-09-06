@@ -123,6 +123,35 @@ _L2_L3_CLUSTER_PROFILE_CN = {
     "mean_trade_active_imbalance": "主动侧不平衡",
 }
 
+_L2_L3_HMM_DIAGNOSTICS_CN = {
+    "selected_k": "选中 K",
+    "bic": "BIC",
+    "log_likelihood": "对数似然",
+    "iterations": "迭代数",
+    "converged": "收敛",
+}
+
+_L2_L3_HMM_PROFILE_CN = {
+    "hmm_state": "状态",
+    "behavior_label": "行为标签",
+    "rows": "分钟数",
+    "share": "占比",
+    "mean_posterior": "平均后验",
+    "mean_duration_minutes": "平均持续分钟",
+    "mean_submit_volume": "平均提交量",
+    "mean_trade_volume": "平均成交量",
+    "mean_event_cancel_volume": "平均撤单量",
+    "mean_submit_fill_ratio": "填单率",
+    "mean_submit_cancel_ratio": "撤单率",
+    "mean_submit_order_hhi": "订单集中度",
+}
+
+_L2_L3_HMM_TRANSITIONS_CN = {
+    "from_state": "起始状态",
+    "to_state": "最可能下一状态",
+    "transition_prob": "转移概率",
+}
+
 _KLINE_ORTHOGONAL_POOL = [
     "alpha_range_compression_21d",
     "alpha_gap_pressure_21d",
@@ -208,6 +237,7 @@ body {
     margin: 0;
     padding: 24px;
     line-height: 1.6;
+    overflow-x: hidden;
 }
 .header {
     background: linear-gradient(135deg, var(--accent), var(--accent-soft));
@@ -239,6 +269,7 @@ body {
     padding: 22px 26px;
     margin-bottom: 20px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    overflow: hidden;
 }
 .section h2 {
     margin: 0 0 14px;
@@ -250,7 +281,9 @@ body {
 .section h3 { font-size: 15px; color: #374151; margin: 18px 0 6px; }
 table.dataframe {
     border-collapse: collapse;
-    width: 100%;
+    width: max-content;
+    max-width: none;
+    min-width: 100%;
     font-size: 13px;
 }
 table.dataframe th {
@@ -284,6 +317,7 @@ details {
     border-radius: 8px;
     padding: 10px 16px;
     background: #fcfdfe;
+    overflow: hidden;
 }
 details summary {
     cursor: pointer;
@@ -328,6 +362,16 @@ details summary {
     border-radius: 999px;
 }
 .nav .nav-method a:hover { text-decoration: none; background: #c3e9cf; }
+.link-method {
+    color: #0f7b3e;
+    background: #d9f2e0;
+    padding: 3px 10px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+}
+.link-method:hover { background: #c3e9cf; }
 /* 摘要框 */
 .summary {
     border-left: 4px solid var(--accent-soft);
@@ -384,6 +428,28 @@ details summary {
 .section h3 { font-size: 15px; color: #374151; margin: 18px 0 6px; }
 .guide { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
 table.dataframe.dim th, table.dataframe.dim td { padding: 5px 9px; font-size: 12px; }
+.table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 8px 0 14px;
+    -webkit-overflow-scrolling: touch;
+}
+.section > div[style*="grid-template-columns"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+}
+@media (max-width: 820px) {
+    body { padding: 12px; }
+    .header, .section { padding: 18px 16px; border-radius: 8px; }
+    .nav { position: static; }
+    .nav .nav-method { margin-left: 0; }
+    .factor-card { align-items: flex-start; flex-wrap: wrap; }
+    .factor-card .name { min-width: 0; width: calc(100% - 40px); }
+    .factor-card .desc { flex-basis: 100%; }
+    .factor-card .metrics { text-align: left; white-space: normal; }
+    .section > div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+}
 """
 
 
@@ -401,7 +467,8 @@ def _table_html(frame: pd.DataFrame, rename: dict[str, str], digits: int = 4) ->
     for column in view.columns:
         if pd.api.types.is_float_dtype(view[column]):
             view[column] = view[column].map(lambda value: _fmt(value, digits))
-    return view.to_html(index=False, border=0, escape=True, classes="dataframe")
+    table = view.to_html(index=False, border=0, escape=True, classes="dataframe")
+    return f'<div class="table-wrap">{table}</div>'
 
 
 def _read_optional_csv(path: Path) -> pd.DataFrame:
@@ -480,6 +547,41 @@ def _l2_l3_cluster_profile(profile: pd.DataFrame) -> pd.DataFrame:
     return view.sort_values("share", ascending=False).reset_index(drop=True)
 
 
+def _l2_l3_hmm_diagnostics(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    if diagnostics.empty or "bic" not in diagnostics:
+        return pd.DataFrame()
+    selected = diagnostics.sort_values("bic", ascending=True).head(1).copy()
+    return selected.rename(columns={"k": "selected_k"})
+
+
+def _l2_l3_hmm_profile(profile: pd.DataFrame) -> pd.DataFrame:
+    if profile.empty:
+        return pd.DataFrame()
+    view = profile.copy()
+    top_volume = view["mean_submit_volume"].idxmax() if "mean_submit_volume" in view else None
+
+    def _label(row: pd.Series) -> str:
+        if float(row.get("mean_submit_cancel_ratio", 0.0)) >= 0.50:
+            return "高撤单压力状态"
+        if float(row.get("mean_submit_order_hhi", 0.0)) >= 0.20 and float(row.get("mean_submit_fill_ratio", 0.0)) >= 0.75:
+            return "大单成交集中状态"
+        if top_volume is not None and row.name == top_volume:
+            return "高活跃冲击状态"
+        if float(row.get("mean_duration_minutes", 0.0)) >= 8.0:
+            return "持续流动性背景状态"
+        return "短促切换状态"
+
+    view["behavior_label"] = view.apply(_label, axis=1)
+    return view.sort_values("share", ascending=False).reset_index(drop=True)
+
+
+def _l2_l3_hmm_transition_summary(transitions: pd.DataFrame) -> pd.DataFrame:
+    if transitions.empty:
+        return pd.DataFrame()
+    idx = transitions.groupby("from_state")["transition_prob"].idxmax()
+    return transitions.loc[idx].sort_values("from_state").reset_index(drop=True)
+
+
 def _l2_l3_section_html(report_dir: Path | None) -> str:
     if report_dir is None:
         return ""
@@ -488,6 +590,9 @@ def _l2_l3_section_html(report_dir: Path | None) -> str:
     quality = _read_optional_csv(report_dir / "minute_quality_gates_sample.csv")
     diagnostics = _read_optional_csv(report_dir / "static_clusters_sample" / "diagnostics.csv")
     profile = _read_optional_csv(report_dir / "static_clusters_sample" / "profile.csv")
+    hmm_diagnostics = _read_optional_csv(report_dir / "hmm_states_sample" / "diagnostics.csv")
+    hmm_profile = _read_optional_csv(report_dir / "hmm_states_sample" / "profile.csv")
+    hmm_transitions = _read_optional_csv(report_dir / "hmm_states_sample" / "transitions.csv")
 
     coverage_table = _table_html(_l2_l3_coverage_summary(coverage), _L2_L3_COVERAGE_CN) if not coverage.empty else ""
     quality_table = _table_html(_l2_l3_quality_summary(quality), _L2_L3_QUALITY_CN) if not quality.empty else ""
@@ -501,8 +606,23 @@ def _l2_l3_section_html(report_dir: Path | None) -> str:
         if not profile.empty
         else ""
     )
+    hmm_diagnostics_table = (
+        _table_html(_l2_l3_hmm_diagnostics(hmm_diagnostics), _L2_L3_HMM_DIAGNOSTICS_CN)
+        if not hmm_diagnostics.empty
+        else ""
+    )
+    hmm_profile_table = (
+        _table_html(_l2_l3_hmm_profile(hmm_profile), _L2_L3_HMM_PROFILE_CN)
+        if not hmm_profile.empty
+        else ""
+    )
+    hmm_transitions_table = (
+        _table_html(_l2_l3_hmm_transition_summary(hmm_transitions), _L2_L3_HMM_TRANSITIONS_CN)
+        if not hmm_transitions.empty
+        else ""
+    )
 
-    if coverage.empty and quality.empty and diagnostics.empty and profile.empty:
+    if coverage.empty and quality.empty and diagnostics.empty and profile.empty and hmm_diagnostics.empty:
         data_note = "<p class='guide'>当前没有检测到 reports/l2_l3 下的样例产物；方法链已接入，重跑 L2/L3 命令后会自动填入覆盖、质量门和聚类摘要。</p>"
     else:
         data_note = ""
@@ -512,7 +632,7 @@ def _l2_l3_section_html(report_dir: Path | None) -> str:
     <h2>A 股 L2/L3 逐笔订单生命周期</h2>
     <p class="guide">这个模块把深市逐笔委托与逐笔成交/撤单回连到订单生命周期，再聚合为分钟级微观结构特征。它与美股日线因子池分开：当前用于验证“势力/生命周期状态”的数据基础，还不是可交易 alpha 结论。</p>
     <div class="summary">
-        <div class="verdict">阶段结论：深市委托流可以稳定回连，静态聚类已能形成 4 类行为窗口。</div>
+        <div class="verdict">阶段结论：深市委托流可以稳定回连，静态聚类形成 4 类行为窗口，HMM 样例进一步拆出状态序列。</div>
         <ul>
             <li>关键回连键是 <code>ex_order_id</code>，不是本地 <code>order_id</code>。</li>
             <li>撤单来自逐笔成交流的 <code>trade_code='C'</code>，不是委托流里的显式状态。</li>
@@ -520,14 +640,54 @@ def _l2_l3_section_html(report_dir: Path | None) -> str:
         </ul>
     </div>
     {data_note}
-    <h3>覆盖与字段事实</h3>
+    <h3 id="l2-l3-coverage">覆盖与字段事实</h3>
     {coverage_table}
-    <h3>分钟质量门样例</h3>
+    <h3 id="l2-l3-quality">分钟质量门样例</h3>
     {quality_table}
-    <h3>静态势力聚类样例</h3>
+    <h3 id="l2-l3-static-clusters">静态势力聚类样例</h3>
     {selected_k_table}
     {profile_table}
-    <p class="guide">当前静态聚类来自少量深市股票日样例，适合解释行为 taxonomy；下一步需要用 HMM/状态转移把这些分钟窗口串成可检验的生命周期阶段。</p>
+    <h3 id="l2-l3-hmm-states">HMM 状态序列样例</h3>
+    {hmm_diagnostics_table}
+    {hmm_profile_table}
+    {hmm_transitions_table}
+    <p class="guide">当前 HMM 与静态聚类来自少量深市股票日样例，适合解释行为 taxonomy 与状态转移；正式结论还需要扩展股票日、做分期稳定性和未来收益验证。</p>
+</div>
+"""
+
+
+def _l2_l3_entry_section_html(report_dir: Path | None, report_link: str | None) -> str:
+    if report_dir is None or report_link is None:
+        return ""
+
+    coverage = _read_optional_csv(report_dir / "daily_coverage.csv")
+    diagnostics = _read_optional_csv(report_dir / "static_clusters_sample" / "diagnostics.csv")
+    hmm_diagnostics = _read_optional_csv(report_dir / "hmm_states_sample" / "diagnostics.csv")
+    quality = _read_optional_csv(report_dir / "minute_quality_gates_sample.csv")
+
+    coverage_summary = _l2_l3_coverage_summary(coverage)
+    hmm_summary = _l2_l3_hmm_diagnostics(hmm_diagnostics)
+    cluster_summary = _l2_l3_selected_k(diagnostics)
+    quality_summary = _l2_l3_quality_summary(quality)
+
+    join_rate = "—"
+    if not coverage_summary.empty:
+        join_rate = _fmt(float(coverage_summary.iloc[0]["min_cancel_hit_rate"]))
+    static_k = "—" if cluster_summary.empty else str(int(cluster_summary.iloc[0]["selected_k"]))
+    hmm_k = "—" if hmm_summary.empty else str(int(hmm_summary.iloc[0]["selected_k"]))
+    gate = "待生成" if quality_summary.empty else str(quality_summary.iloc[0]["gate_status"])
+
+    return f"""
+<div class="section" id="l2-l3-entry">
+    <h2>A 股 L2/L3 逐笔专题</h2>
+    <p class="guide">这是一条独立于美股日线因子池的微观结构研究线。关键回连键是 <code>ex_order_id</code>；主报告只保留入口，订单生命周期、质量门、静态聚类和 HMM 状态序列的完整表格已拆到专题页。</p>
+    <div class="cards">
+        <div class="card"><div class="label">订单回连率下限</div><div class="value">{join_rate}</div></div>
+        <div class="card"><div class="label">静态行为簇</div><div class="value">K={html_lib.escape(static_k)}</div></div>
+        <div class="card"><div class="label">HMM 状态数</div><div class="value">K={html_lib.escape(hmm_k)}</div></div>
+        <div class="card"><div class="label">分钟质量门</div><div class="value">{html_lib.escape(gate)}</div></div>
+    </div>
+    <p><a class="link-method" href="{html_lib.escape(report_link)}">打开 L2/L3 专题报告 →</a></p>
 </div>
 """
 
@@ -945,7 +1105,8 @@ def _verdict_table_html(frame: pd.DataFrame) -> str:
             f"<td>{html_lib.escape(str(row['verdict']))}</td>",
         ]
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
-    return f'<table class="dataframe">{thead}<tbody>{"".join(body_rows)}</tbody></table>'
+    table = f'<table class="dataframe">{thead}<tbody>{"".join(body_rows)}</tbody></table>'
+    return f'<div class="table-wrap">{table}</div>'
 
 
 def _verdict_summary(frame: pd.DataFrame) -> str:
@@ -1010,6 +1171,7 @@ def build_html_report(
     latent_states: pd.DataFrame | None = None,
     experiment_validations: dict[str, pd.DataFrame] | None = None,
     l2_l3_report_dir: str | Path | None = None,
+    l2_l3_report_link: str | None = "l2_l3_report.html",
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -1079,14 +1241,17 @@ def build_html_report(
         top_n=kline_discovery_top_n,
     )
     latent_section = _latent_section_html(latent_states, factors, horizon=horizon)
-    l2_l3_section = _l2_l3_section_html(Path(l2_l3_report_dir) if l2_l3_report_dir else None)
+    l2_l3_entry_section = _l2_l3_entry_section_html(
+        Path(l2_l3_report_dir) if l2_l3_report_dir else None,
+        l2_l3_report_link,
+    )
     experiment_validation_section = _experiment_validation_section_html(experiment_validations)
     kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
     kline_discovery_nav = (
         '<a href="#kline-discovery">路径发现</a>' if kline_discovery_section else ""
     )
     latent_nav = '<a href="#latent-participants">隐藏参与者</a>' if latent_section else ""
-    l2_l3_nav = '<a href="#l2-l3-lifecycle">L2/L3 逐笔</a>' if l2_l3_section else ""
+    l2_l3_nav = '<a href="#l2-l3-entry">L2/L3 专题</a>' if l2_l3_entry_section else ""
     experiment_validation_nav = (
         '<a href="#experiment-validation">实验检验</a>' if experiment_validation_section else ""
     )
@@ -1115,11 +1280,11 @@ def build_html_report(
 
 <nav class="nav">
     <a href="#summary">执行摘要</a>
+    {l2_l3_nav}
     <a href="#cards">候选因子</a>
     {kline_nav}
     {kline_discovery_nav}
     {latent_nav}
-    {l2_l3_nav}
     {experiment_validation_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
@@ -1138,6 +1303,8 @@ def build_html_report(
     {summary_html}
 </div>
 
+{l2_l3_entry_section}
+
 <div class="section" id="cards">
     <h2>候选因子</h2>
     <p class="guide">IC 排名前 {top_n} 的因子逐条说明：含义、信号强弱与回测换手。排名越靠前代表对未来 {horizon} 日收益的预测力越强。</p>
@@ -1151,8 +1318,6 @@ def build_html_report(
 {kline_discovery_section}
 
 {latent_section}
-
-{l2_l3_section}
 
 {experiment_validation_section}
 
@@ -1201,6 +1366,62 @@ def build_html_report(
 
 <div class="footer">
     本报告由 us_alpha_lab 自动生成　·　仅供学习研究，不构成投资建议，历史表现不代表未来收益
+</div>
+</body>
+</html>
+"""
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(page, encoding="utf-8")
+    return output_path
+
+
+def build_l2_l3_html_report(
+    report_dir: str | Path = "reports/l2_l3",
+    output_path: str | Path = "l2_l3_report.html",
+    main_report_link: str | None = "research_report.html",
+    methodology_link: str | None = "methodology.html",
+) -> Path:
+    """Build a standalone A-share L2/L3 microstructure research HTML report."""
+    generated_on = datetime.now(timezone.utc).date().isoformat()
+    report_dir_path = Path(report_dir)
+    back_links = []
+    if main_report_link:
+        back_links.append(f'<a class="link-method" href="{html_lib.escape(main_report_link)}">主研究报告 →</a>')
+    if methodology_link:
+        back_links.append(f'<a class="link-method" href="{html_lib.escape(methodology_link)}">方法流水线 →</a>')
+    links_html = '<span class="nav-method">' + " ".join(back_links) + "</span>" if back_links else ""
+    l2_l3_section = _l2_l3_section_html(report_dir_path)
+
+    page = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A 股 L2/L3 逐笔研究报告 — {generated_on}</title>
+<style>{_CSS}</style>
+</head>
+<body>
+<div class="header">
+    <h1>A 股 L2/L3 逐笔研究报告</h1>
+    <p>生成日期：{generated_on}　·　研究域：深市逐笔委托 + 逐笔成交/撤单</p>
+    <p class="note">仅供学习研究，不构成投资建议；当前样例结果不代表可交易收益。</p>
+</div>
+
+<nav class="nav">
+    <a href="#l2-l3-lifecycle">订单生命周期</a>
+    <a href="#l2-l3-coverage">覆盖事实</a>
+    <a href="#l2-l3-quality">质量门</a>
+    <a href="#l2-l3-static-clusters">静态聚类</a>
+    <a href="#l2-l3-hmm-states">HMM 状态序列</a>
+    {links_html}
+</nav>
+
+{l2_l3_section}
+
+<div class="footer">
+    本专题由 us_alpha_lab 自动生成　·　样例用于方法学验证，正式结论需扩样本与收益检验
 </div>
 </body>
 </html>

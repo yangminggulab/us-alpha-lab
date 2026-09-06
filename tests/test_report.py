@@ -5,7 +5,7 @@ import pandas as pd
 
 from us_alpha_lab.kline_tokens import add_kline_sequence_factors
 from us_alpha_lab.latent_participant import add_latent_participant_states
-from us_alpha_lab.report import build_html_report
+from us_alpha_lab.report import build_html_report, build_l2_l3_html_report
 from us_alpha_lab.visualization import _setup_chinese_font
 
 
@@ -201,7 +201,7 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
     assert "#experiment-validation" in html
 
 
-def test_build_html_report_has_l2_l3_section(tmp_path) -> None:
+def test_build_html_report_links_to_standalone_l2_l3_report(tmp_path) -> None:
     l2_l3_dir = tmp_path / "l2_l3"
     (l2_l3_dir / "static_clusters_sample").mkdir(parents=True)
     pd.DataFrame(
@@ -253,6 +253,41 @@ def test_build_html_report_has_l2_l3_section(tmp_path) -> None:
             }
         ]
     ).to_csv(l2_l3_dir / "static_clusters_sample" / "profile.csv", index=False)
+    (l2_l3_dir / "hmm_states_sample").mkdir()
+    pd.DataFrame(
+        [
+            {
+                "k": 2,
+                "log_likelihood": -100.0,
+                "bic": 250.0,
+                "iterations": 5,
+                "converged": True,
+            }
+        ]
+    ).to_csv(l2_l3_dir / "hmm_states_sample" / "diagnostics.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "hmm_state": 0,
+                "rows": 20,
+                "share": 1.0,
+                "mean_posterior": 0.95,
+                "mean_duration_minutes": 5.0,
+                "mean_submit_volume": 1_000_000.0,
+                "mean_trade_volume": 300_000.0,
+                "mean_event_cancel_volume": 200_000.0,
+                "mean_submit_fill_ratio": 0.6,
+                "mean_submit_cancel_ratio": 0.2,
+                "mean_submit_order_hhi": 0.1,
+            }
+        ]
+    ).to_csv(l2_l3_dir / "hmm_states_sample" / "profile.csv", index=False)
+    pd.DataFrame(
+        [
+            {"from_state": 0, "to_state": 0, "transition_prob": 0.80},
+            {"from_state": 0, "to_state": 1, "transition_prob": 0.20},
+        ]
+    ).to_csv(l2_l3_dir / "hmm_states_sample" / "transitions.csv", index=False)
 
     path = build_html_report(
         _synthetic_factors(),
@@ -263,11 +298,25 @@ def test_build_html_report_has_l2_l3_section(tmp_path) -> None:
     )
 
     html = path.read_text(encoding="utf-8")
-    assert "A 股 L2/L3 逐笔订单生命周期" in html
-    assert "#l2-l3-lifecycle" in html
+    assert "A 股 L2/L3 逐笔专题" in html
+    assert "#l2-l3-entry" in html
+    assert "l2_l3_report.html" in html
     assert "ex_order_id" in html
-    assert "a-share-l3" not in html
-    assert "静态势力聚类样例" in html
+    assert "静态势力聚类样例" not in html
+    assert "HMM 状态序列样例" not in html
+
+    standalone_path = build_l2_l3_html_report(
+        report_dir=l2_l3_dir,
+        output_path=tmp_path / "l2_l3_report.html",
+    )
+
+    standalone_html = standalone_path.read_text(encoding="utf-8")
+    assert "A 股 L2/L3 逐笔研究报告" in standalone_html
+    assert "A 股 L2/L3 逐笔订单生命周期" in standalone_html
+    assert "#l2-l3-hmm-states" in standalone_html
+    assert "静态势力聚类样例" in standalone_html
+    assert "HMM 状态序列样例" in standalone_html
+    assert "最可能下一状态" in standalone_html
 
 
 def test_chinese_font_setup_does_not_raise() -> None:

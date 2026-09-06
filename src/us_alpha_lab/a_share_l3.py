@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +70,7 @@ DEFAULT_STATIC_CLUSTER_LOG_FEATURES = {
     "event_cancel_volume",
     "submit_mean_lifetime_lower_bound_ms",
 }
+DEFAULT_HMM_STATE_FEATURES = DEFAULT_STATIC_CLUSTER_FEATURES
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,23 @@ class StaticForceClusterResult:
     profile: pd.DataFrame
     feature_columns: list[str]
     selected_k: int
+
+
+@dataclass(frozen=True)
+class HMMForceRegimeResult:
+    labels: pd.DataFrame
+    diagnostics: pd.DataFrame
+    profile: pd.DataFrame
+    transitions: pd.DataFrame
+    feature_columns: list[str]
+    selected_k: int
+
+
+@dataclass(frozen=True)
+class StateSignalScreenResult:
+    summary: pd.DataFrame
+    cell_level: pd.DataFrame
+    spread: pd.DataFrame
 
 
 def read_stock_day(
@@ -749,6 +768,310 @@ def cluster_share_report(labels: pd.DataFrame) -> pd.DataFrame:
     return counts.sort_values(["date", "wind_code", "force_cluster"]).reset_index(drop=True)
 
 
+def run_hmm_force_regimes(
+    minute_features: pd.DataFrame,
+    *,
+    feature_columns: list[str] | None = None,
+    k_values: list[int] | None = None,
+    sessions: list[str] | None = None,
+    clip_quantile: float = 0.01,
+    max_iter: int = 50,
+    tol: float = 1e-4,
+    transition_smoothing: float = 0.05,
+    covariance_floor: float = 1e-3,
+    random_state: int = 0,
+) -> HMMForceRegimeResult:
+    """Fit diagonal Gaussian HMM regimes on minute-level order-flow features."""
+    try:
+        from sklearn.cluster import KMeans
+    except ImportError as exc:  # pragma: no cover - dependency declared in pyproject
+        raise ImportError("run_hmm_force_regimes requires scikit-learn for initialization.") from exc
+
+    _require_columns(minute_features, ["wind_code", "date", "minute", "session"], "minute_features")
+    selected_features = [
+        column
+        for column in (feature_columns or DEFAULT_HMM_STATE_FEATURES)
+        if column in minute_features.columns
+    ]
+    if not selected_features:
+        raise ValueError("no usable HMM feature columns were found")
+
+    data = minute_features.copy()
+    if sessions is not None:
+        data = data.loc[data["session"].astype(str).isin(sessions)].copy()
+    data = data.sort_values(["date", "wind_code", "minute"]).reset_index(drop=True)
+    if len(data) < 3:
+        raise ValueError("need at least 3 minute rows for HMM regime fitting")
+
+    observation = _prepare_cluster_matrix(
+        data,
+        selected_features,
+        clip_quantile=clip_quantile,
+    )
+    matrix = observation[[f"z_{column}" for column in selected_features]].to_numpy(dtype=float)
+    sequences = _sequence_slices(observation)
+    allowed_k = [k for k in (k_values or [2, 3, 4, 5, 6]) if 1 < k < len(data)]
+    if not allowed_k:
+        raise ValueError("no valid k values for the available minute rows")
+
+    diagnostics_rows = []
+    fitted: dict[int, dict[str, np.ndarray | float | int | bool]] = {}
+    for k in allowed_k:
+        initial_labels = KMeans(n_clusters=k, n_init=20, random_state=random_state).fit_predict(matrix)
+        params = _initialize_hmm_parameters(
+            matrix,
+            initial_labels,
+            sequences,
+            k=k,
+            transition_smoothing=transition_smoothing,
+            covariance_floor=covariance_floor,
+        )
+        log_likelihood = -np.inf
+        converged = False
+        iteration = 0
+        for iteration in range(1, max_iter + 1):
+            log_emit = _hmm_log_emission(matrix, params["means"], params["variances"])
+            stats = _hmm_expectation(
+                log_emit,
+                np.log(params["startprob"]),
+                np.log(params["transmat"]),
+                sequences,
+            )
+            new_log_likelihood = float(stats["log_likelihood"])
+            if np.isfinite(log_likelihood) and abs(new_log_likelihood - log_likelihood) <= tol:
+                log_likelihood = new_log_likelihood
+                converged = True
+                break
+            log_likelihood = new_log_likelihood
+            params = _hmm_maximization(
+                matrix,
+                stats,
+                transition_smoothing=transition_smoothing,
+                covariance_floor=covariance_floor,
+            )
+
+        param_count = (k - 1) + k * (k - 1) + 2 * k * matrix.shape[1]
+        bic = -2.0 * log_likelihood + param_count * np.log(len(matrix))
+        diagnostics_rows.append(
+            {
+                "k": k,
+                "log_likelihood": log_likelihood,
+                "bic": float(bic),
+                "iterations": iteration,
+                "converged": bool(converged),
+            }
+        )
+        fitted[k] = {
+            **params,
+            "log_likelihood": log_likelihood,
+            "bic": float(bic),
+            "iterations": iteration,
+            "converged": bool(converged),
+        }
+
+    diagnostics = pd.DataFrame(diagnostics_rows).sort_values(["bic", "k"]).reset_index(drop=True)
+    selected_k = int(diagnostics.iloc[0]["k"])
+    selected = fitted[selected_k]
+    log_emit = _hmm_log_emission(matrix, selected["means"], selected["variances"])
+    stats = _hmm_expectation(
+        log_emit,
+        np.log(selected["startprob"]),
+        np.log(selected["transmat"]),
+        sequences,
+    )
+    path = _hmm_viterbi(
+        log_emit,
+        np.log(selected["startprob"]),
+        np.log(selected["transmat"]),
+        sequences,
+    )
+    labels = observation.copy()
+    posterior = stats["gamma"]
+    labels["hmm_state"] = path
+    labels["hmm_state_posterior"] = posterior[np.arange(len(labels)), path]
+    for state in range(selected_k):
+        labels[f"hmm_state_prob_{state}"] = posterior[:, state]
+
+    profile = _hmm_profile(labels, selected_features)
+    transitions = _transition_frame(selected["transmat"])
+    return HMMForceRegimeResult(
+        labels=labels,
+        diagnostics=diagnostics,
+        profile=profile,
+        transitions=transitions,
+        feature_columns=selected_features,
+        selected_k=selected_k,
+    )
+
+
+def add_minute_forward_returns(
+    frame: pd.DataFrame,
+    horizons: Iterable[int] = (1, 3, 5),
+    *,
+    price_col: str = "quote_last_price_scaled",
+) -> pd.DataFrame:
+    """Add clock-minute forward returns aligned within each stock-day.
+
+    A forward h-minute return at minute ``t`` is ``price[t + h] / price[t] - 1``
+    and is only defined when a continuous-session row exists at ``t + h`` on the
+    same stock-day. Rows at auction/closing minutes and rows whose target minute
+    is absent (lunch break, halt, end of session) get ``NaN`` automatically, which
+    keeps returns from silently spanning non-trading gaps.
+    """
+    _require_columns(frame, ["wind_code", "date", "minute", "session", price_col], "frame")
+    key_columns = ["wind_code", "date"]
+    if frame.duplicated(key_columns + ["minute"]).any():
+        raise ValueError("add_minute_forward_returns requires one row per (wind_code, date, minute)")
+
+    result = frame.copy()
+    result["_key_minute"] = pd.to_numeric(result["minute"], errors="coerce").astype("float64")
+    result["_price"] = pd.to_numeric(result[price_col], errors="coerce")
+    result["_session"] = result["session"].astype(str)
+
+    for horizon in sorted({int(value) for value in horizons}):
+        target = result[key_columns + ["_key_minute", "_session", "_price"]].copy()
+        target = target.rename(
+            columns={
+                "_key_minute": "_target_minute",
+                "_session": "_target_session",
+                "_price": "_target_price",
+            }
+        )
+        lookup = result[key_columns + ["_key_minute"]].copy()
+        lookup["_target_minute"] = lookup["_key_minute"] + float(horizon)
+        joined = lookup.merge(target, on=key_columns + ["_target_minute"], how="left")
+
+        base_price = result["_price"]
+        forward = joined["_target_price"] / base_price - 1.0
+        valid = (
+            base_price.gt(0.0)
+            & base_price.notna()
+            & joined["_target_price"].notna()
+            & joined["_target_session"].eq("continuous")
+        )
+        result[f"future_return_{horizon}m"] = forward.where(valid)
+
+    return result.drop(columns=["_key_minute", "_price", "_session"])
+
+
+def state_signal_screen(
+    frame: pd.DataFrame,
+    *,
+    state_col: str = "hmm_state",
+    horizons: Iterable[int] = (1, 3, 5),
+) -> StateSignalScreenResult:
+    """Describe per-state forward returns to screen whether states differentiate direction.
+
+    ``summary`` reports pooled statistics per (state, horizon); ``cell_level`` reports
+    per (date, wind_code, state, horizon) means for eyeballing cross-cell consistency;
+    ``spread`` reports the pooled top-minus-bottom state mean gap per horizon.
+    """
+    _require_columns(frame, [state_col], "frame")
+    forward_columns = sorted(
+        (
+            f"future_return_{int(value)}m"
+            for value in horizons
+            if f"future_return_{int(value)}m" in frame.columns
+        ),
+        key=lambda column: int(column.split("_")[2].rstrip("m")),
+    )
+    if not forward_columns:
+        raise ValueError(
+            "no future_return_{h}m columns found; call add_minute_forward_returns first"
+        )
+
+    summary_rows = []
+    cell_rows = []
+    for state, group in frame.groupby(state_col, sort=True):
+        for column in forward_columns:
+            horizon = int(column.split("_")[2].rstrip("m"))
+            values = pd.to_numeric(group[column], errors="coerce").dropna()
+            count = len(values)
+            if count == 0:
+                summary_rows.append(_empty_state_summary(state_col, state, horizon))
+                continue
+            mean = float(values.mean())
+            std = float(values.std(ddof=1)) if count > 1 else np.nan
+            se = float(std / np.sqrt(count)) if count > 1 and np.isfinite(std) else np.nan
+            t_stat = float(mean / se) if se and np.isfinite(se) else np.nan
+            summary_rows.append(
+                {
+                    state_col: state,
+                    "horizon_min": horizon,
+                    "n": count,
+                    "mean_ret_bps": mean * 10_000.0,
+                    "std_ret_bps": std * 10_000.0 if np.isfinite(std) else np.nan,
+                    "se_bps": se * 10_000.0 if np.isfinite(se) else np.nan,
+                    "t": t_stat,
+                    "pos_rate": float((values > 0.0).mean()),
+                }
+            )
+            for (date, wind_code), stock_day in group.groupby(["date", "wind_code"], sort=True):
+                cell_values = pd.to_numeric(stock_day[column], errors="coerce").dropna()
+                cell_rows.append(
+                    {
+                        "date": date,
+                        "wind_code": wind_code,
+                        state_col: state,
+                        "horizon_min": horizon,
+                        "n": len(cell_values),
+                        "mean_ret_bps": float(cell_values.mean() * 10_000.0) if len(cell_values) else np.nan,
+                    }
+                )
+    summary = pd.DataFrame(summary_rows).sort_values(
+        ["horizon_min", state_col],
+        ascending=[True, True],
+    )
+    cell_level = pd.DataFrame(cell_rows).sort_values(
+        ["date", "wind_code", "horizon_min", state_col],
+        ascending=[True, True, True, True],
+    )
+    spread_rows = []
+    for column in forward_columns:
+        horizon = int(column.split("_")[2].rstrip("m"))
+        state_rows = summary.loc[summary["horizon_min"].eq(horizon) & summary["n"].gt(0)]
+        if state_rows.empty:
+            continue
+        best = state_rows.loc[state_rows["mean_ret_bps"].idxmax()]
+        worst = state_rows.loc[state_rows["mean_ret_bps"].idxmin()]
+        spread_rows.append(
+            {
+                "horizon_min": horizon,
+                "top_state": best[state_col],
+                "top_mean_ret_bps": float(best["mean_ret_bps"]),
+                "top_n": int(best["n"]),
+                "bottom_state": worst[state_col],
+                "bottom_mean_ret_bps": float(worst["mean_ret_bps"]),
+                "bottom_n": int(worst["n"]),
+                "spread_bps": float(best["mean_ret_bps"] - worst["mean_ret_bps"]),
+            }
+        )
+    spread = pd.DataFrame(spread_rows).sort_values("horizon_min")
+    return StateSignalScreenResult(
+        summary=summary,
+        cell_level=cell_level,
+        spread=spread,
+    )
+
+
+def _empty_state_summary(
+    state_col: str,
+    state: object,
+    horizon: int,
+    count: int,
+) -> dict[str, float | int | object]:
+    return {
+        state_col: state,
+        "horizon_min": horizon,
+        "n": count,
+        "mean_ret_bps": np.nan,
+        "std_ret_bps": np.nan,
+        "se_bps": np.nan,
+        "t": np.nan,
+        "pos_rate": np.nan,
+    }
+
+
 def _trade_minute_features(
     trades: pd.DataFrame,
     lifecycle: pd.DataFrame,
@@ -871,6 +1194,224 @@ def _cluster_profile(labels: pd.DataFrame, feature_columns: list[str]) -> pd.Dat
         rows.append(row)
     profile = pd.DataFrame(rows)
     return profile.sort_values(["rows", "force_cluster"], ascending=[False, True]).reset_index(drop=True)
+
+
+def _sequence_slices(observation: pd.DataFrame) -> list[slice]:
+    keys = ["date", "wind_code"]
+    sequences = []
+    start = 0
+    for _, group in observation.groupby(keys, sort=False, dropna=False):
+        stop = start + len(group)
+        if stop > start:
+            sequences.append(slice(start, stop))
+        start = stop
+    return sequences
+
+
+def _initialize_hmm_parameters(
+    matrix: np.ndarray,
+    initial_labels: np.ndarray,
+    sequences: list[slice],
+    *,
+    k: int,
+    transition_smoothing: float,
+    covariance_floor: float,
+) -> dict[str, np.ndarray]:
+    start_counts = np.full(k, transition_smoothing, dtype=float)
+    transition_counts = np.full((k, k), transition_smoothing, dtype=float)
+    for seq in sequences:
+        labels = initial_labels[seq]
+        start_counts[labels[0]] += 1.0
+        if len(labels) > 1:
+            np.add.at(transition_counts, (labels[:-1], labels[1:]), 1.0)
+
+    means = np.zeros((k, matrix.shape[1]), dtype=float)
+    variances = np.zeros((k, matrix.shape[1]), dtype=float)
+    global_mean = matrix.mean(axis=0)
+    global_var = matrix.var(axis=0) + covariance_floor
+    for state in range(k):
+        members = matrix[initial_labels == state]
+        if len(members):
+            means[state] = members.mean(axis=0)
+            variances[state] = members.var(axis=0) + covariance_floor
+        else:
+            means[state] = global_mean
+            variances[state] = global_var
+    return {
+        "startprob": _normalize_vector(start_counts),
+        "transmat": _normalize_rows(transition_counts),
+        "means": means,
+        "variances": np.maximum(variances, covariance_floor),
+    }
+
+
+def _hmm_log_emission(matrix: np.ndarray, means: np.ndarray, variances: np.ndarray) -> np.ndarray:
+    safe_variances = np.maximum(variances, 1e-12)
+    diff = matrix[:, None, :] - means[None, :, :]
+    return -0.5 * (
+        np.log(2.0 * np.pi * safe_variances).sum(axis=1)[None, :]
+        + ((diff**2) / safe_variances[None, :, :]).sum(axis=2)
+    )
+
+
+def _hmm_expectation(
+    log_emit: np.ndarray,
+    log_start: np.ndarray,
+    log_trans: np.ndarray,
+    sequences: list[slice],
+) -> dict[str, np.ndarray | float]:
+    n_obs, k = log_emit.shape
+    gamma = np.zeros((n_obs, k), dtype=float)
+    xi_sum = np.zeros((k, k), dtype=float)
+    start_gamma = np.zeros(k, dtype=float)
+    log_likelihood = 0.0
+
+    for seq in sequences:
+        emissions = log_emit[seq]
+        alpha = np.zeros_like(emissions)
+        beta = np.zeros_like(emissions)
+        alpha[0] = log_start + emissions[0]
+        for t in range(1, len(emissions)):
+            alpha[t] = emissions[t] + _logsumexp(alpha[t - 1][:, None] + log_trans, axis=0)
+        sequence_log_likelihood = float(_logsumexp(alpha[-1], axis=0))
+        log_likelihood += sequence_log_likelihood
+
+        for t in range(len(emissions) - 2, -1, -1):
+            beta[t] = _logsumexp(log_trans + emissions[t + 1][None, :] + beta[t + 1][None, :], axis=1)
+
+        seq_gamma = np.exp(alpha + beta - sequence_log_likelihood)
+        seq_gamma = np.clip(seq_gamma, 0.0, 1.0)
+        seq_gamma = _normalize_rows(seq_gamma)
+        gamma[seq] = seq_gamma
+        start_gamma += seq_gamma[0]
+        for t in range(len(emissions) - 1):
+            xi_log = (
+                alpha[t][:, None]
+                + log_trans
+                + emissions[t + 1][None, :]
+                + beta[t + 1][None, :]
+                - sequence_log_likelihood
+            )
+            xi_sum += np.exp(xi_log)
+
+    return {
+        "gamma": gamma,
+        "xi_sum": xi_sum,
+        "start_gamma": start_gamma,
+        "log_likelihood": log_likelihood,
+    }
+
+
+def _hmm_maximization(
+    matrix: np.ndarray,
+    stats: dict[str, np.ndarray | float],
+    *,
+    transition_smoothing: float,
+    covariance_floor: float,
+) -> dict[str, np.ndarray]:
+    gamma = stats["gamma"]
+    xi_sum = stats["xi_sum"]
+    start_gamma = stats["start_gamma"]
+    weights = gamma.sum(axis=0).clip(min=1e-12)
+    means = (gamma.T @ matrix) / weights[:, None]
+    centered = matrix[:, None, :] - means[None, :, :]
+    variances = (gamma[:, :, None] * centered**2).sum(axis=0) / weights[:, None]
+    return {
+        "startprob": _normalize_vector(start_gamma + transition_smoothing),
+        "transmat": _normalize_rows(xi_sum + transition_smoothing),
+        "means": means,
+        "variances": np.maximum(variances, covariance_floor),
+    }
+
+
+def _hmm_viterbi(
+    log_emit: np.ndarray,
+    log_start: np.ndarray,
+    log_trans: np.ndarray,
+    sequences: list[slice],
+) -> np.ndarray:
+    path = np.zeros(len(log_emit), dtype=int)
+    for seq in sequences:
+        emissions = log_emit[seq]
+        delta = np.zeros_like(emissions)
+        back = np.zeros_like(emissions, dtype=int)
+        delta[0] = log_start + emissions[0]
+        for t in range(1, len(emissions)):
+            scores = delta[t - 1][:, None] + log_trans
+            back[t] = np.argmax(scores, axis=0)
+            delta[t] = emissions[t] + scores[back[t], np.arange(log_emit.shape[1])]
+        seq_path = np.zeros(len(emissions), dtype=int)
+        seq_path[-1] = int(np.argmax(delta[-1]))
+        for t in range(len(emissions) - 2, -1, -1):
+            seq_path[t] = back[t + 1, seq_path[t + 1]]
+        path[seq] = seq_path
+    return path
+
+
+def _hmm_profile(labels: pd.DataFrame, feature_columns: list[str]) -> pd.DataFrame:
+    run_lengths = _state_run_lengths(labels)
+    rows = []
+    for state, group in labels.groupby("hmm_state", sort=True):
+        row: dict[str, float | int | str] = {
+            "hmm_state": int(state),
+            "rows": len(group),
+            "share": len(group) / len(labels),
+            "mean_posterior": float(group["hmm_state_posterior"].mean()),
+            "mean_duration_minutes": float(run_lengths.get(int(state), pd.Series([1.0])).mean()),
+        }
+        for column in feature_columns:
+            row[f"mean_{column}"] = float(group[column].mean())
+        rows.append(row)
+    profile = pd.DataFrame(rows)
+    return profile.sort_values(["rows", "hmm_state"], ascending=[False, True]).reset_index(drop=True)
+
+
+def _state_run_lengths(labels: pd.DataFrame) -> dict[int, pd.Series]:
+    lengths: dict[int, list[int]] = {}
+    for _, group in labels.groupby(["date", "wind_code"], sort=False, dropna=False):
+        states = group["hmm_state"].to_numpy()
+        if len(states) == 0:
+            continue
+        start = 0
+        for index in range(1, len(states) + 1):
+            if index == len(states) or states[index] != states[start]:
+                state = int(states[start])
+                lengths.setdefault(state, []).append(index - start)
+                start = index
+    return {state: pd.Series(values, dtype=float) for state, values in lengths.items()}
+
+
+def _transition_frame(transmat: np.ndarray) -> pd.DataFrame:
+    rows = []
+    for from_state in range(transmat.shape[0]):
+        for to_state in range(transmat.shape[1]):
+            rows.append(
+                {
+                    "from_state": from_state,
+                    "to_state": to_state,
+                    "transition_prob": float(transmat[from_state, to_state]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _normalize_vector(values: np.ndarray) -> np.ndarray:
+    total = float(values.sum())
+    if total <= 0 or not np.isfinite(total):
+        return np.full(len(values), 1.0 / len(values))
+    return values / total
+
+
+def _normalize_rows(values: np.ndarray) -> np.ndarray:
+    row_sums = values.sum(axis=1, keepdims=True)
+    return np.divide(values, row_sums, out=np.full_like(values, 1.0 / values.shape[1]), where=row_sums > 0)
+
+
+def _logsumexp(values: np.ndarray, axis: int) -> np.ndarray:
+    max_value = np.max(values, axis=axis, keepdims=True)
+    stable = np.exp(values - max_value).sum(axis=axis, keepdims=True)
+    result = max_value + np.log(stable)
+    return np.squeeze(result, axis=axis)
 
 
 def _add_fill_aggressor_side(fills: pd.DataFrame, lifecycle: pd.DataFrame) -> pd.DataFrame:

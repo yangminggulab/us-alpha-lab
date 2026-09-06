@@ -67,7 +67,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
       margin-top: 28px;
     }
@@ -112,6 +112,10 @@
 
     .method .meta {
       color: var(--accent-2);
+    }
+
+    .l2 .meta {
+      color: #1f4e79;
     }
 
     footer {
@@ -176,6 +180,17 @@
         <div class="meta">
           <span>Open methodology</span>
           <span>methodology.html</span>
+        </div>
+      </a>
+
+      <a class="card l2" href="l2_l3_report.html">
+        <div>
+          <h2>A 股 L2/L3 专题</h2>
+          <p>查看逐笔订单生命周期、质量门、静态势力聚类和 HMM 状态序列。</p>
+        </div>
+        <div class="meta">
+          <span>Open L2/L3</span>
+          <span>l2_l3_report.html</span>
         </div>
       </a>
     </section>

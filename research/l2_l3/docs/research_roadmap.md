@@ -17,6 +17,13 @@
 
 **限制**：11 天且横跨 2017–2019（T+1、流动性结构不同于当下）。够跑方法原型与信号检测，不足以下正式稳健结论。
 
+## 当前实现进度
+
+- ③ 委托生命周期重构已跑通：`ex_order_id` 回连、成交/撤单/剩余对账、分钟特征与质量门已实现。
+- ④ 静态聚类已跑通：样本 `20170123,20170124 × 000725.SZ,000001.SZ,000002.SZ` 上 KMeans silhouette 选 K=4。
+- ④ HMM 状态序列已跑通：同一样本上 diagonal Gaussian HMM 用 BIC 选 K=6，输出 `reports/l2_l3/hmm_states_sample/{labels.parquet,diagnostics.csv,profile.csv,transitions.csv}`。
+- 下一步：做 leave-one-day-out 稳定性、单股时间线抽检和未来 1–5 min 收益验证。
+
 ## 研究方向树
 
 ```

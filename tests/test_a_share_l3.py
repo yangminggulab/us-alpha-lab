@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+import pytest
 
 from us_alpha_lab.a_share_l3 import (
+    add_minute_forward_returns,
     build_minute_features,
     build_order_lifecycle,
     cluster_share_report,
@@ -10,7 +13,9 @@ from us_alpha_lab.a_share_l3 import (
     lifecycle_quality_report,
     minute_quality_report,
     quote_volume_reconciliation,
+    run_hmm_force_regimes,
     run_static_force_clustering,
+    state_signal_screen,
 )
 
 
@@ -497,3 +502,148 @@ def test_run_static_force_clustering_selects_clear_two_cluster_shape() -> None:
     shares = cluster_share_report(result.labels)
     assert set(shares.columns) == {"date", "wind_code", "force_cluster", "rows", "share"}
     assert shares.groupby(["date", "wind_code"])["share"].sum().round(6).eq(1.0).all()
+
+
+def test_run_hmm_force_regimes_fits_state_sequence_and_transitions() -> None:
+    rows = []
+    for index in range(10):
+        rows.append(
+            {
+                "wind_code": "000001.SZ",
+                "date": 20170123,
+                "minute": 570 + index,
+                "session": "continuous",
+                "submit_buy_sell_imbalance": 0.75 + index * 0.01,
+                "submit_order_hhi": 0.10,
+                "submit_fill_ratio": 0.82,
+                "submit_cancel_ratio": 0.08,
+                "submit_open_ratio": 0.10,
+                "submit_top_order_share": 0.25,
+                "trade_active_imbalance": 0.85,
+                "cancel_buy_sell_imbalance": -0.10,
+                "submit_volume": 500_000 + index * 100,
+                "trade_volume": 350_000 + index * 100,
+                "event_cancel_volume": 20_000 + index * 100,
+                "submit_mean_lifetime_lower_bound_ms": 5_000 + index,
+            }
+        )
+    for index in range(10):
+        rows.append(
+            {
+                "wind_code": "000001.SZ",
+                "date": 20170123,
+                "minute": 580 + index,
+                "session": "continuous",
+                "submit_buy_sell_imbalance": -0.80 - index * 0.01,
+                "submit_order_hhi": 0.60,
+                "submit_fill_ratio": 0.22,
+                "submit_cancel_ratio": 0.65,
+                "submit_open_ratio": 0.13,
+                "submit_top_order_share": 0.72,
+                "trade_active_imbalance": -0.88,
+                "cancel_buy_sell_imbalance": 0.55,
+                "submit_volume": 90_000 + index * 100,
+                "trade_volume": 20_000 + index * 100,
+                "event_cancel_volume": 60_000 + index * 100,
+                "submit_mean_lifetime_lower_bound_ms": 20_000 + index,
+            }
+        )
+
+    result = run_hmm_force_regimes(
+        pd.DataFrame(rows),
+        k_values=[2],
+        max_iter=20,
+        random_state=3,
+    )
+
+    assert result.selected_k == 2
+    assert set(result.labels["hmm_state"]) == {0, 1}
+    assert result.labels["hmm_state_posterior"].between(0.0, 1.0).all()
+    assert {"k", "log_likelihood", "bic", "iterations", "converged"}.issubset(result.diagnostics.columns)
+    assert result.profile["rows"].sum() == 20
+    assert result.transitions.groupby("from_state")["transition_prob"].sum().round(6).eq(1.0).all()
+
+
+def test_add_minute_forward_returns_contiguous_arithmetic() -> None:
+    frame = pd.DataFrame(
+        [
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 570 + index, "session": "continuous",
+             "quote_last_price_scaled": 10.0 + index}
+            for index in range(4)
+        ]
+    )
+    out = add_minute_forward_returns(frame, horizons=(1, 2))
+
+    returns_1m = out["future_return_1m"].to_numpy()
+    assert np.isclose(returns_1m[0], 11.0 / 10.0 - 1.0)
+    assert np.isclose(returns_1m[1], 12.0 / 11.0 - 1.0)
+    assert np.isclose(returns_1m[2], 13.0 / 12.0 - 1.0)
+    assert np.isnan(returns_1m[3])
+    returns_2m = out["future_return_2m"].to_numpy()
+    assert np.isclose(returns_2m[0], 12.0 / 10.0 - 1.0)
+    assert np.isclose(returns_2m[1], 13.0 / 11.0 - 1.0)
+    assert np.isnan(returns_2m[2])
+    assert np.isnan(returns_2m[3])
+
+
+def test_add_minute_forward_returns_gap_and_auction_produce_nan() -> None:
+    frame = pd.DataFrame(
+        [
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 0, "session": "opening_auction",
+             "quote_last_price_scaled": 9.0},
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 685, "session": "continuous",
+             "quote_last_price_scaled": 10.0},
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 686, "session": "continuous",
+             "quote_last_price_scaled": 11.0},
+            # 687 / 688 missing: models the lunch break
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 689, "session": "continuous",
+             "quote_last_price_scaled": 12.0},
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 690, "session": "continuous",
+             "quote_last_price_scaled": 13.0},
+        ]
+    )
+    out = add_minute_forward_returns(frame, horizons=(1, 2)).set_index("minute")
+
+    # Auction row never gets a forward return.
+    assert np.isnan(out.at[0, "future_return_1m"])
+    assert np.isnan(out.at[0, "future_return_2m"])
+    # Contiguous neighbour returns are computed.
+    assert np.isclose(out.at[685, "future_return_1m"], 11.0 / 10.0 - 1.0)
+    assert np.isclose(out.at[689, "future_return_1m"], 13.0 / 12.0 - 1.0)
+    # Returns whose target minute falls into the missing gap are NaN.
+    assert np.isnan(out.at[686, "future_return_1m"])
+    assert np.isnan(out.at[685, "future_return_2m"])
+    assert np.isnan(out.at[686, "future_return_2m"])
+    # Last minute has no future to point at.
+    assert np.isnan(out.at[690, "future_return_1m"])
+
+
+def test_state_signal_screen_summary_matches_manual_mean() -> None:
+    rows = []
+    for index in range(10):
+        rows.append(
+            {"wind_code": "000725.SZ", "date": 20170123, "minute": 570 + index, "session": "continuous",
+             "quote_last_price_scaled": 10.0 + index, "hmm_state": "A"}
+        )
+    for index in range(10):
+        rows.append(
+            {"wind_code": "000002.SZ", "date": 20170124, "minute": 580 + index, "session": "continuous",
+             "quote_last_price_scaled": 20.0, "hmm_state": "B"}
+        )
+    out = add_minute_forward_returns(pd.DataFrame(rows), horizons=(1,))
+    result = state_signal_screen(out, state_col="hmm_state", horizons=(1,))
+
+    state_a = result.summary.loc[result.summary["hmm_state"].eq("A")].iloc[0]
+    manual_a = out.loc[out["hmm_state"].eq("A"), "future_return_1m"].mean() * 10_000.0
+    assert state_a["n"] == 9
+    assert state_a["mean_ret_bps"] == pytest.approx(manual_a)
+    state_b = result.summary.loc[result.summary["hmm_state"].eq("B")].iloc[0]
+    manual_b = out.loc[out["hmm_state"].eq("B"), "future_return_1m"].mean() * 10_000.0
+    assert state_b["n"] == 9
+    assert state_b["mean_ret_bps"] == pytest.approx(manual_b)
+
+    assert result.cell_level.groupby("hmm_state")["n"].sum().to_dict() == {"A": 9, "B": 9}
+    spread_row = result.spread.iloc[0]
+    assert spread_row["top_state"] == "A"
+    assert spread_row["bottom_state"] == "B"
+    assert spread_row["spread_bps"] == pytest.approx(state_a["mean_ret_bps"] - state_b["mean_ret_bps"])

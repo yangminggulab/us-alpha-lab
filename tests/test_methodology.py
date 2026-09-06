@@ -56,6 +56,7 @@ def test_methodology_html_contains_l2_l3_pipeline(tmp_path) -> None:
         "a-share-l3-minute-features",
         "a-share-l3-quality-gates",
         "a-share-l3-static-clusters",
+        "a-share-l3-hmm-states",
         "orders.ex_order_id",
         "HMM 状态序列",
     ):
@@ -67,3 +68,4 @@ def test_methodology_backlink_points_to_report(tmp_path) -> None:
 
     html = path.read_text(encoding="utf-8")
     assert 'href="research_report.html"' in html
+    assert 'href="l2_l3_report.html"' in html
