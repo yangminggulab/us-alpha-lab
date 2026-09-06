@@ -5,6 +5,17 @@ from pathlib import Path
 import pandas as pd
 import typer
 
+from us_alpha_lab.a_share_l3 import (
+    available_l2_l3_days,
+    build_l3_coverage_report,
+    build_minute_features,
+    build_order_lifecycle,
+    build_quality_gate_report,
+    cluster_share_report,
+    lifecycle_quality_report,
+    read_stock_day,
+    run_static_force_clustering,
+)
 from us_alpha_lab.alpha_cluster import diagnostics_to_frame, run_alpha_cluster, save_cluster_outputs
 from us_alpha_lab.alpha_registry import alpha_registry_frame
 from us_alpha_lab.analysis import factor_ic_report
@@ -267,6 +278,197 @@ def latent_participants(
     typer.echo(f"Saved {len(frame):,} rows to {output_path}")
 
 
+@app.command("a-share-l3-lifecycle")
+def a_share_l3_lifecycle(
+    date: str = typer.Option(..., help="Trading day, e.g. 20170123."),
+    wind_code: str = typer.Option(..., help="A-share Wind code, e.g. 000725.SZ."),
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    output_path: Path | None = typer.Option(
+        None,
+        help="Output lifecycle parquet path. Defaults to reports/l2_l3/lifecycle_<date>_<ticker>.parquet.",
+    ),
+    quality_path: Path | None = typer.Option(
+        None,
+        help="Optional one-row CSV quality report path.",
+    ),
+) -> None:
+    stock_day = read_stock_day(raw_dir, date, wind_code, include_quotes=True)
+    lifecycle = build_order_lifecycle(stock_day.orders, stock_day.trades)
+    ticker_slug = wind_code.replace(".", "_")
+    target = output_path or Path("reports/l2_l3") / f"lifecycle_{date}_{ticker_slug}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lifecycle.to_parquet(target, index=False)
+
+    quality = lifecycle_quality_report(
+        stock_day.orders,
+        stock_day.trades,
+        lifecycle,
+        quotes=stock_day.quotes,
+    )
+    if quality_path is not None:
+        quality_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([quality]).to_csv(quality_path, index=False)
+    typer.echo(f"Saved {len(lifecycle):,} lifecycle rows to {target}")
+    typer.echo(pd.DataFrame([quality]).to_string(index=False))
+
+
+@app.command("a-share-l3-coverage")
+def a_share_l3_coverage(
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    dates: str | None = typer.Option(
+        None,
+        help="Comma-separated trading days. Defaults to all complete local days.",
+    ),
+    output_path: Path = typer.Option(
+        Path("reports/l2_l3/daily_coverage.csv"),
+        help="Output daily coverage CSV path.",
+    ),
+) -> None:
+    parsed_dates = _parse_csv_option(dates)
+    selected_dates = parsed_dates
+    if selected_dates is None:
+        selected_dates = available_l2_l3_days(raw_dir)
+    rows = []
+    for date in selected_dates:
+        typer.echo(f"Scanning {date}...")
+        rows.append(build_l3_coverage_report(raw_dir, dates=[date]))
+    report_frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    report_frame.to_csv(output_path, index=False)
+    typer.echo(f"Saved {len(report_frame):,} daily coverage rows to {output_path}")
+    typer.echo(report_frame.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
+@app.command("a-share-l3-minute-features")
+def a_share_l3_minute_features(
+    date: str = typer.Option(..., help="Trading day, e.g. 20170123."),
+    wind_code: str = typer.Option(..., help="A-share Wind code, e.g. 000725.SZ."),
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    output_path: Path | None = typer.Option(
+        None,
+        help="Output minute feature parquet path. Defaults to reports/l2_l3/minute_features_<date>_<ticker>.parquet.",
+    ),
+) -> None:
+    stock_day = read_stock_day(raw_dir, date, wind_code, include_quotes=True)
+    lifecycle = build_order_lifecycle(stock_day.orders, stock_day.trades)
+    minute_features = build_minute_features(
+        lifecycle,
+        stock_day.trades,
+        quotes=stock_day.quotes,
+    )
+    ticker_slug = wind_code.replace(".", "_")
+    target = output_path or Path("reports/l2_l3") / f"minute_features_{date}_{ticker_slug}.parquet"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    minute_features.to_parquet(target, index=False)
+    typer.echo(f"Saved {len(minute_features):,} minute feature rows to {target}")
+    typer.echo(minute_features.head(12).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
+@app.command("a-share-l3-quality-gates")
+def a_share_l3_quality_gates(
+    dates: str = typer.Option(..., help="Comma-separated trading days, e.g. 20170123,20170124."),
+    wind_codes: str = typer.Option(..., help="Comma-separated SZ Wind codes, e.g. 000725.SZ,000001.SZ."),
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    output_path: Path = typer.Option(
+        Path("reports/l2_l3/minute_quality_gates.csv"),
+        help="Output quality gate CSV path.",
+    ),
+) -> None:
+    parsed_dates = _parse_csv_option(dates) or []
+    parsed_wind_codes = _parse_csv_option(wind_codes) or []
+    rows = []
+    for date in parsed_dates:
+        for wind_code in parsed_wind_codes:
+            typer.echo(f"Checking {date} {wind_code}...")
+            rows.append(build_quality_gate_report(raw_dir, dates=[date], wind_codes=[wind_code]))
+    report_frame = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    report_frame.to_csv(output_path, index=False)
+    typer.echo(f"Saved {len(report_frame):,} quality gate rows to {output_path}")
+    typer.echo(report_frame.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
+@app.command("a-share-l3-static-clusters")
+def a_share_l3_static_clusters(
+    dates: str = typer.Option(..., help="Comma-separated trading days, e.g. 20170123,20170124."),
+    wind_codes: str = typer.Option(..., help="Comma-separated SZ Wind codes, e.g. 000725.SZ,000001.SZ."),
+    raw_dir: Path = typer.Option(
+        Path("data/raw/a_share_l2_hf"),
+        help="Raw A-share L2/L3 archive directory.",
+    ),
+    output_dir: Path = typer.Option(
+        Path("reports/l2_l3/static_clusters"),
+        help="Directory for cluster labels, diagnostics, and profile outputs.",
+    ),
+    k_values: str = typer.Option("2,3,4,5,6", help="Comma-separated candidate cluster counts."),
+    sessions: str = typer.Option(
+        "continuous",
+        help="Comma-separated sessions to include, or 'all'.",
+    ),
+    feature_columns: str | None = typer.Option(
+        None,
+        help="Optional comma-separated minute feature columns. Defaults to the L3 static feature set.",
+    ),
+    clip_quantile: float = typer.Option(0.01, help="Two-sided winsorization quantile."),
+    random_state: int = typer.Option(0, help="KMeans random seed."),
+) -> None:
+    parsed_dates = _parse_csv_option(dates) or []
+    parsed_wind_codes = _parse_csv_option(wind_codes) or []
+    minute_frames = []
+    for date in parsed_dates:
+        for wind_code in parsed_wind_codes:
+            typer.echo(f"Building minute features for {date} {wind_code}...")
+            stock_day = read_stock_day(raw_dir, date, wind_code, include_quotes=True)
+            lifecycle = build_order_lifecycle(stock_day.orders, stock_day.trades)
+            minute_frames.append(
+                build_minute_features(
+                    lifecycle,
+                    stock_day.trades,
+                    quotes=stock_day.quotes,
+                )
+            )
+    minute_features = pd.concat(minute_frames, ignore_index=True) if minute_frames else pd.DataFrame()
+    parsed_k_values = [int(value) for value in (_parse_csv_option(k_values) or [])]
+    parsed_sessions = None if sessions.strip().lower() == "all" else _parse_csv_option(sessions)
+    result = run_static_force_clustering(
+        minute_features,
+        feature_columns=_parse_csv_option(feature_columns),
+        k_values=parsed_k_values,
+        sessions=parsed_sessions,
+        clip_quantile=clip_quantile,
+        random_state=random_state,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    labels_path = output_dir / "labels.parquet"
+    diagnostics_path = output_dir / "diagnostics.csv"
+    profile_path = output_dir / "profile.csv"
+    shares_path = output_dir / "shares.csv"
+    result.labels.to_parquet(labels_path, index=False)
+    result.diagnostics.to_csv(diagnostics_path, index=False)
+    result.profile.to_csv(profile_path, index=False)
+    shares = cluster_share_report(result.labels)
+    shares.to_csv(shares_path, index=False)
+    typer.echo(f"Selected K={result.selected_k} using features: {', '.join(result.feature_columns)}")
+    typer.echo(f"Saved labels to {labels_path}")
+    typer.echo(f"Saved diagnostics to {diagnostics_path}")
+    typer.echo(f"Saved profile to {profile_path}")
+    typer.echo(f"Saved shares to {shares_path}")
+    typer.echo(result.diagnostics.to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+    typer.echo(result.profile.head(12).to_string(index=False, float_format=lambda value: f"{value:.6f}"))
+
+
 @app.command()
 def train(
     config: Path = typer.Option(Path("configs/universe.yaml"), help="Research config path."),
@@ -419,6 +621,10 @@ def html_report_cmd(
         "reports/experiment_validation/latent_participant_validation.csv",
         help="Comma-separated experiment validation CSV paths; missing files are ignored.",
     ),
+    l2_l3_report_dir: Path | None = typer.Option(
+        Path("reports/l2_l3"),
+        help="Optional A-share L2/L3 report directory; ignored when disabled.",
+    ),
 ) -> None:
     cfg = load_config(config)
     factor_frame = pd.read_parquet(cfg.factors_path)
@@ -454,6 +660,7 @@ def html_report_cmd(
         kline_discovery=kline_discovery_frame,
         latent_states=latent_states_frame,
         experiment_validations=experiment_validations,
+        l2_l3_report_dir=l2_l3_report_dir,
     )
     typer.echo(f"Saved HTML report to {path}")
 

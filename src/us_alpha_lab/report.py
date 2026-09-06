@@ -79,6 +79,50 @@ _EXPERIMENT_VALIDATION_CN = {
     "validation_score": "检验分",
 }
 
+_L2_L3_COVERAGE_CN = {
+    "days": "样本天数",
+    "order_rows": "委托行数",
+    "trade_rows": "成交/撤单行数",
+    "order_stock_range": "委托股票数区间",
+    "trade_stock_range": "成交股票数区间",
+    "sh_trade_without_orders_range": "沪市仅成交股票数区间",
+    "min_ask_fill_hit_rate": "ask 回连率下限",
+    "min_bid_fill_hit_rate": "bid 回连率下限",
+    "min_cancel_hit_rate": "撤单回连率下限",
+}
+
+_L2_L3_QUALITY_CN = {
+    "gate_status": "质量门",
+    "stock_days": "股票日数",
+    "max_failure_count": "最大失败数",
+    "max_warning_count": "最大警告数",
+    "max_submit_volume_diff_abs": "提交量差异上限",
+    "max_trade_volume_diff_abs": "成交量差异上限",
+    "max_cancel_event_volume_diff_abs": "撤单量差异上限",
+    "max_quote_trade_volume_diff_abs": "盘口成交量差异上限",
+    "max_unresolved_aggressor_ratio": "主动侧未解比例上限",
+}
+
+_L2_L3_CLUSTER_DIAGNOSTICS_CN = {
+    "selected_k": "选中 K",
+    "silhouette": "轮廓系数",
+    "inertia": "簇内平方和",
+}
+
+_L2_L3_CLUSTER_PROFILE_CN = {
+    "force_cluster": "簇",
+    "behavior_label": "行为标签",
+    "rows": "分钟数",
+    "share": "占比",
+    "mean_submit_volume": "平均提交量",
+    "mean_trade_volume": "平均成交量",
+    "mean_event_cancel_volume": "平均撤单量",
+    "mean_submit_fill_ratio": "填单率",
+    "mean_submit_cancel_ratio": "撤单率",
+    "mean_submit_order_hhi": "订单集中度",
+    "mean_trade_active_imbalance": "主动侧不平衡",
+}
+
 _KLINE_ORTHOGONAL_POOL = [
     "alpha_range_compression_21d",
     "alpha_gap_pressure_21d",
@@ -358,6 +402,134 @@ def _table_html(frame: pd.DataFrame, rename: dict[str, str], digits: int = 4) ->
         if pd.api.types.is_float_dtype(view[column]):
             view[column] = view[column].map(lambda value: _fmt(value, digits))
     return view.to_html(index=False, border=0, escape=True, classes="dataframe")
+
+
+def _read_optional_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    return pd.read_csv(path)
+
+
+def _l2_l3_coverage_summary(coverage: pd.DataFrame) -> pd.DataFrame:
+    if coverage.empty:
+        return pd.DataFrame()
+
+    def _range(column: str) -> str:
+        return f"{int(coverage[column].min()):,} - {int(coverage[column].max()):,}"
+
+    row = {
+        "days": int(coverage["date"].nunique()) if "date" in coverage else len(coverage),
+        "order_rows": int(coverage["order_rows"].sum()),
+        "trade_rows": int(coverage["trade_rows"].sum()),
+        "order_stock_range": _range("order_stocks"),
+        "trade_stock_range": _range("trade_stocks"),
+        "sh_trade_without_orders_range": _range("trade_stocks_without_orders"),
+        "min_ask_fill_hit_rate": float(coverage["ask_fill_hit_rate"].min()),
+        "min_bid_fill_hit_rate": float(coverage["bid_fill_hit_rate"].min()),
+        "min_cancel_hit_rate": float(coverage["cancel_hit_rate"].min()),
+    }
+    return pd.DataFrame([row])
+
+
+def _l2_l3_quality_summary(quality: pd.DataFrame) -> pd.DataFrame:
+    if quality.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for status, group in quality.groupby("gate_status", dropna=False):
+        rows.append(
+            {
+                "gate_status": status,
+                "stock_days": len(group),
+                "max_failure_count": int(group["failure_count"].max()),
+                "max_warning_count": int(group["warning_count"].max()),
+                "max_submit_volume_diff_abs": float(group["submit_volume_diff_abs"].max()),
+                "max_trade_volume_diff_abs": float(group["trade_volume_diff_abs"].max()),
+                "max_cancel_event_volume_diff_abs": float(group["cancel_event_volume_diff_abs"].max()),
+                "max_quote_trade_volume_diff_abs": float(group["quote_trade_volume_diff_abs"].max()),
+                "max_unresolved_aggressor_ratio": float(group["unresolved_aggressor_ratio"].max()),
+            }
+        )
+    return pd.DataFrame(rows).sort_values("gate_status").reset_index(drop=True)
+
+
+def _l2_l3_selected_k(diagnostics: pd.DataFrame) -> pd.DataFrame:
+    if diagnostics.empty or "silhouette" not in diagnostics:
+        return pd.DataFrame()
+    selected = diagnostics.sort_values("silhouette", ascending=False).head(1).copy()
+    return selected.rename(columns={"k": "selected_k"})
+
+
+def _l2_l3_cluster_profile(profile: pd.DataFrame) -> pd.DataFrame:
+    if profile.empty:
+        return pd.DataFrame()
+
+    view = profile.copy()
+    top_volume = view["mean_submit_volume"].idxmax() if "mean_submit_volume" in view else None
+
+    def _label(row: pd.Series) -> str:
+        if float(row.get("mean_submit_cancel_ratio", 0.0)) >= 0.45:
+            return "撤单压力/试探窗口"
+        if float(row.get("mean_submit_order_hhi", 0.0)) >= 0.20 and float(row.get("mean_submit_fill_ratio", 0.0)) >= 0.70:
+            return "大单集中成交窗口"
+        if top_volume is not None and row.name == top_volume:
+            return "高活跃冲击窗口"
+        return "常规流动性背景"
+
+    view["behavior_label"] = view.apply(_label, axis=1)
+    return view.sort_values("share", ascending=False).reset_index(drop=True)
+
+
+def _l2_l3_section_html(report_dir: Path | None) -> str:
+    if report_dir is None:
+        return ""
+
+    coverage = _read_optional_csv(report_dir / "daily_coverage.csv")
+    quality = _read_optional_csv(report_dir / "minute_quality_gates_sample.csv")
+    diagnostics = _read_optional_csv(report_dir / "static_clusters_sample" / "diagnostics.csv")
+    profile = _read_optional_csv(report_dir / "static_clusters_sample" / "profile.csv")
+
+    coverage_table = _table_html(_l2_l3_coverage_summary(coverage), _L2_L3_COVERAGE_CN) if not coverage.empty else ""
+    quality_table = _table_html(_l2_l3_quality_summary(quality), _L2_L3_QUALITY_CN) if not quality.empty else ""
+    selected_k_table = (
+        _table_html(_l2_l3_selected_k(diagnostics), _L2_L3_CLUSTER_DIAGNOSTICS_CN)
+        if not diagnostics.empty
+        else ""
+    )
+    profile_table = (
+        _table_html(_l2_l3_cluster_profile(profile), _L2_L3_CLUSTER_PROFILE_CN)
+        if not profile.empty
+        else ""
+    )
+
+    if coverage.empty and quality.empty and diagnostics.empty and profile.empty:
+        data_note = "<p class='guide'>当前没有检测到 reports/l2_l3 下的样例产物；方法链已接入，重跑 L2/L3 命令后会自动填入覆盖、质量门和聚类摘要。</p>"
+    else:
+        data_note = ""
+
+    return f"""
+<div class="section" id="l2-l3-lifecycle">
+    <h2>A 股 L2/L3 逐笔订单生命周期</h2>
+    <p class="guide">这个模块把深市逐笔委托与逐笔成交/撤单回连到订单生命周期，再聚合为分钟级微观结构特征。它与美股日线因子池分开：当前用于验证“势力/生命周期状态”的数据基础，还不是可交易 alpha 结论。</p>
+    <div class="summary">
+        <div class="verdict">阶段结论：深市委托流可以稳定回连，静态聚类已能形成 4 类行为窗口。</div>
+        <ul>
+            <li>关键回连键是 <code>ex_order_id</code>，不是本地 <code>order_id</code>。</li>
+            <li>撤单来自逐笔成交流的 <code>trade_code='C'</code>，不是委托流里的显式状态。</li>
+            <li>沪市样本只有成交流、没有委托流，因此订单生命周期研究域先限定为深市。</li>
+        </ul>
+    </div>
+    {data_note}
+    <h3>覆盖与字段事实</h3>
+    {coverage_table}
+    <h3>分钟质量门样例</h3>
+    {quality_table}
+    <h3>静态势力聚类样例</h3>
+    {selected_k_table}
+    {profile_table}
+    <p class="guide">当前静态聚类来自少量深市股票日样例，适合解释行为 taxonomy；下一步需要用 HMM/状态转移把这些分钟窗口串成可检验的生命周期阶段。</p>
+</div>
+"""
 
 
 def _metric_cards(factors: pd.DataFrame, ic_report: pd.DataFrame) -> str:
@@ -837,6 +1009,7 @@ def build_html_report(
     kline_discovery_top_n: int = 12,
     latent_states: pd.DataFrame | None = None,
     experiment_validations: dict[str, pd.DataFrame] | None = None,
+    l2_l3_report_dir: str | Path | None = None,
 ) -> Path:
     """Build a self-contained HTML research report (charts embedded as base64)."""
     ic_report = factor_ic_report(factors, horizon=horizon)
@@ -906,12 +1079,14 @@ def build_html_report(
         top_n=kline_discovery_top_n,
     )
     latent_section = _latent_section_html(latent_states, factors, horizon=horizon)
+    l2_l3_section = _l2_l3_section_html(Path(l2_l3_report_dir) if l2_l3_report_dir else None)
     experiment_validation_section = _experiment_validation_section_html(experiment_validations)
     kline_nav = '<a href="#kline">K 线路径</a>' if kline_section else ""
     kline_discovery_nav = (
         '<a href="#kline-discovery">路径发现</a>' if kline_discovery_section else ""
     )
     latent_nav = '<a href="#latent-participants">隐藏参与者</a>' if latent_section else ""
+    l2_l3_nav = '<a href="#l2-l3-lifecycle">L2/L3 逐笔</a>' if l2_l3_section else ""
     experiment_validation_nav = (
         '<a href="#experiment-validation">实验检验</a>' if experiment_validation_section else ""
     )
@@ -944,6 +1119,7 @@ def build_html_report(
     {kline_nav}
     {kline_discovery_nav}
     {latent_nav}
+    {l2_l3_nav}
     {experiment_validation_nav}
     <a href="#verdict">可盈利判定</a>
     <a href="#ic">IC 检验</a>
@@ -975,6 +1151,8 @@ def build_html_report(
 {kline_discovery_section}
 
 {latent_section}
+
+{l2_l3_section}
 
 {experiment_validation_section}
 

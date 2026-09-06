@@ -34,6 +34,7 @@ def test_build_methodology_html_contains_pipeline_and_chinese(tmp_path) -> None:
     for keyword in (
         "研究方法与流水线",
         "研究流水线",
+        "A 股 L2/L3 逐笔研究流水线",
         "数据获取",
         "因子计算",
         "机器学习预测",
@@ -41,6 +42,22 @@ def test_build_methodology_html_contains_pipeline_and_chinese(tmp_path) -> None:
         "组合回测",
         "结果汇总",
         "当前因子池",
+    ):
+        assert keyword in html
+
+
+def test_methodology_html_contains_l2_l3_pipeline(tmp_path) -> None:
+    path = build_methodology_html(_config(tmp_path), output_path=tmp_path / "methodology.html")
+
+    html = path.read_text(encoding="utf-8")
+    for keyword in (
+        "a-share-l3-coverage",
+        "a-share-l3-lifecycle",
+        "a-share-l3-minute-features",
+        "a-share-l3-quality-gates",
+        "a-share-l3-static-clusters",
+        "orders.ex_order_id",
+        "HMM 状态序列",
     ):
         assert keyword in html
 

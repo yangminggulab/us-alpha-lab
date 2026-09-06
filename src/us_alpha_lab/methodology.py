@@ -96,6 +96,59 @@ def _pipeline_steps(cfg: ResearchConfig) -> list[dict[str, str]]:
     ]
 
 
+def _l2_l3_pipeline_steps() -> list[dict[str, str]]:
+    return [
+        {
+            "title": "M1 覆盖与字段语义 a-share-l3-coverage",
+            "desc": "逐日扫描 A 股 L2/L3 本地样本，锁定交易所覆盖、字段含义、订单回连键与撤单来源。",
+            "algo": "逐笔委托 + 逐笔成交/撤单 → 按 wind_code/date 统计覆盖 → ask/bid/cancel 回连率 → 交易所覆盖边界",
+            "inputs": "data/raw/a_share_l2_l3/<date>/ 逐笔委托、逐笔成交、行情快照",
+            "outputs": "reports/l2_l3/daily_coverage.csv",
+            "cmd": "alpha-lab a-share-l3-coverage --dates <YYYYMMDD,...>",
+        },
+        {
+            "title": "M2 订单生命周期 a-share-l3-lifecycle",
+            "desc": "把每条深市委托回连成交与撤单事件，生成 per-order 生命周期表。",
+            "algo": "orders.ex_order_id ↔ trades.ask_order_id/bid_order_id/cancel_order_id → filled/canceled/remaining 三分类终态 → 生命周期下界",
+            "inputs": "单日单股逐笔委托 + 逐笔成交/撤单",
+            "outputs": "reports/l2_l3/lifecycle_<date>_<wind_code>.parquet",
+            "cmd": "alpha-lab a-share-l3-lifecycle --date <YYYYMMDD> --wind-code <000725.SZ>",
+        },
+        {
+            "title": "M3 分钟特征 a-share-l3-minute-features",
+            "desc": "把订单生命周期、成交事件和盘口快照聚合到分钟，形成可供聚类和状态模型使用的微观结构面板。",
+            "algo": "submit/trade/cancel/quote 四类时钟 → 填单率、撤单率、开放率、订单集中度、主动侧不平衡、盘口成交量对账",
+            "inputs": "per-order 生命周期表 + 逐笔成交/撤单 + 行情快照",
+            "outputs": "reports/l2_l3/minute_features_<date>_<wind_code>.parquet",
+            "cmd": "alpha-lab a-share-l3-minute-features --date <YYYYMMDD> --wind-code <000725.SZ>",
+        },
+        {
+            "title": "M4 质量门 a-share-l3-quality-gates",
+            "desc": "对分钟特征做会计恒等式、边界、缺失和主动侧修复检查，只让可信样本进入聚类。",
+            "algo": "成交量守恒 + 撤单量守恒 + 盘口累计量对账 + ratio/imbalance 边界 + bs_flag 主动侧恢复",
+            "inputs": "分钟特征表",
+            "outputs": "reports/l2_l3/minute_quality_gates_sample.csv",
+            "cmd": "alpha-lab a-share-l3-quality-gates --dates <YYYYMMDD,...> --wind-codes <000725.SZ,...>",
+        },
+        {
+            "title": "M5 静态势力聚类 a-share-l3-static-clusters",
+            "desc": "先不假设状态转移，只在高质量分钟窗口上做行为聚类，得到微观结构行为 taxonomy。",
+            "algo": "连续竞价分钟 → winsorize/log1p/z-score → KMeans K=2..6 → silhouette 选 K → profile/shares 解释",
+            "inputs": "通过质量门的分钟特征表",
+            "outputs": "reports/l2_l3/static_clusters_sample/labels.parquet + diagnostics/profile/shares.csv",
+            "cmd": "alpha-lab a-share-l3-static-clusters --dates <YYYYMMDD,...> --wind-codes <000725.SZ,...>",
+        },
+        {
+            "title": "M6 状态序列 HMM（下一步）",
+            "desc": "在静态行为簇的基础上加入时间转移约束，识别订单生命周期阶段和势力切换。",
+            "algo": "分钟特征或静态簇标签 → HMM/状态转移矩阵 → regime duration、transition surprise、session-level 标签",
+            "inputs": "M3/M5 产物",
+            "outputs": "待定：l2_l3_hmm_states.parquet + 状态解释报告",
+            "cmd": "计划中",
+        },
+    ]
+
+
 def _escape(value: object) -> str:
     return html_lib.escape(str(value))
 
@@ -155,6 +208,21 @@ def _config_cards(cfg: ResearchConfig) -> str:
         ("结束日期", cfg.end),
         ("K 线周期", f"{cfg.multiplier} {cfg.timespan}"),
         ("因子数", str(len(enabled_alpha_specs()))),
+    ]
+    return "\n".join(
+        f'<div class="card"><div class="label">{label}</div>'
+        f'<div class="value">{_escape(value)}</div></div>'
+        for label, value in items
+    )
+
+
+def _l2_l3_status_cards() -> str:
+    items = [
+        ("研究域", "A 股深市逐笔委托 + 逐笔成交/撤单"),
+        ("回连键", "orders.ex_order_id"),
+        ("撤单来源", "trades.trade_code = C"),
+        ("当前阶段", "生命周期、分钟特征、质量门、静态聚类已接入"),
+        ("下一步", "HMM 状态序列"),
     ]
     return "\n".join(
         f'<div class="card"><div class="label">{label}</div>'
@@ -231,6 +299,8 @@ def build_methodology_html(
     generated_on = datetime.now(timezone.utc).date().isoformat()
     pipeline_steps = _pipeline_steps(cfg)
     steps = "\n".join(_step_card(step) for step in pipeline_steps)
+    l2_l3_pipeline_steps = _l2_l3_pipeline_steps()
+    l2_l3_steps = "\n".join(_step_card(step) for step in l2_l3_pipeline_steps)
 
     total_enabled = len(enabled_alpha_specs())
     ml_enabled = any(spec.source == "local_ml" for spec in enabled_alpha_specs())
@@ -274,6 +344,15 @@ def build_methodology_html(
     <p class="desc">数据从原始行情流转到最终报告，共 {len(pipeline_steps)} 步。每一步标注了算法、输入、输出与命令行入口。</p>
     {steps}
     {ml_note}
+</div>
+
+<div class="section">
+    <h2>A 股 L2/L3 逐笔研究流水线</h2>
+    <p class="desc">这条链路是独立研究分支，服务于订单生命周期、撤单压力、成交主动性和隐藏状态识别；当前结论先限定在有委托流的深市样本。</p>
+    <div class="cards">
+    {_l2_l3_status_cards()}
+    </div>
+    {l2_l3_steps}
 </div>
 
 <div class="section">

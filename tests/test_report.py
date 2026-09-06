@@ -201,6 +201,75 @@ def test_build_html_report_has_kline_section(tmp_path) -> None:
     assert "#experiment-validation" in html
 
 
+def test_build_html_report_has_l2_l3_section(tmp_path) -> None:
+    l2_l3_dir = tmp_path / "l2_l3"
+    (l2_l3_dir / "static_clusters_sample").mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "date": 20170123,
+                "order_rows": 10,
+                "trade_rows": 14,
+                "trade_stocks": 2,
+                "trade_stocks_without_orders": 1,
+                "order_stocks": 1,
+                "ask_fill_hit_rate": 1.0,
+                "bid_fill_hit_rate": 1.0,
+                "cancel_hit_rate": 1.0,
+            }
+        ]
+    ).to_csv(l2_l3_dir / "daily_coverage.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "gate_status": "pass",
+                "failure_count": 0,
+                "warning_count": 0,
+                "submit_volume_diff_abs": 0.0,
+                "trade_volume_diff_abs": 0.0,
+                "cancel_event_volume_diff_abs": 0.0,
+                "quote_trade_volume_diff_abs": 0.0,
+                "unresolved_aggressor_ratio": 0.0,
+            }
+        ]
+    ).to_csv(l2_l3_dir / "minute_quality_gates_sample.csv", index=False)
+    pd.DataFrame([{"k": 4, "inertia": 100.0, "silhouette": 0.23}]).to_csv(
+        l2_l3_dir / "static_clusters_sample" / "diagnostics.csv",
+        index=False,
+    )
+    pd.DataFrame(
+        [
+            {
+                "force_cluster": 0,
+                "rows": 20,
+                "share": 1.0,
+                "mean_submit_volume": 1_000_000.0,
+                "mean_trade_volume": 300_000.0,
+                "mean_event_cancel_volume": 200_000.0,
+                "mean_submit_fill_ratio": 0.6,
+                "mean_submit_cancel_ratio": 0.2,
+                "mean_submit_order_hhi": 0.1,
+                "mean_trade_active_imbalance": 0.05,
+            }
+        ]
+    ).to_csv(l2_l3_dir / "static_clusters_sample" / "profile.csv", index=False)
+
+    path = build_html_report(
+        _synthetic_factors(),
+        output_path=tmp_path / "research_report.html",
+        horizon=2,
+        top_n=1,
+        l2_l3_report_dir=l2_l3_dir,
+    )
+
+    html = path.read_text(encoding="utf-8")
+    assert "A 股 L2/L3 逐笔订单生命周期" in html
+    assert "#l2-l3-lifecycle" in html
+    assert "ex_order_id" in html
+    assert "a-share-l3" not in html
+    assert "静态势力聚类样例" in html
+
+
 def test_chinese_font_setup_does_not_raise() -> None:
     _setup_chinese_font()
     assert plt.rcParams["axes.unicode_minus"] is False
